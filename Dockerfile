@@ -8,6 +8,7 @@ RUN dpkg --add-architecture i386 && \
     apt install -y \
     xvfb \
     openbox \
+    x11vnc \
     novnc \
     websockify \
     wine64 \
@@ -16,7 +17,6 @@ RUN dpkg --add-architecture i386 && \
     curl \
     unzip \
     procps \
-    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/taskbarhero

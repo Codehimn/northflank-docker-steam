@@ -1,26 +1,18 @@
-# Taskbar Hero Northflank Docker
+# Taskbar Hero Northflank Docker v2
 
-Diseñado para:
-- Ubuntu minimal
-- Xvfb (pantalla virtual)
-- Openbox (gestor gráfico mínimo)
-- noVNC para login manual
-- Wine para ejecutar juegos Windows
+Cambios incluidos:
+- Añadido x11vnc.
+- Corregida cadena gráfica:
+  Xvfb -> x11vnc -> websockify -> noVNC.
+- Puerto público recomendado en Northflank:
+  6080 HTTP.
 
-Flujo recomendado:
+Acceso:
+http://TU_DOMINIO:6080/vnc.html
 
-1. Crear servicio en Northflank.
-2. Construir la imagen.
-3. Entrar por noVNC.
-4. Hacer login de Steam y resolver captcha.
-5. Descargar/copiar Taskbar Hero.
-6. Cambiar start.sh para lanzar el ejecutable.
+Esta versión permite entrar por navegador para realizar login/captcha.
 
-Ejemplo:
-
-wine /opt/taskbarhero/game/TBH.exe
-
-Para ahorrar RAM después del login:
-- quitar noVNC
-- quitar Openbox si no es necesario
-- arrancar solamente Xvfb + Wine + juego
+Después de conseguir la sesión de Steam se puede optimizar:
+- eliminar noVNC
+- eliminar Openbox
+- ejecutar solamente Wine + Taskbar Hero para reducir RAM.

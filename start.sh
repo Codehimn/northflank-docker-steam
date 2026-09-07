@@ -1,22 +1,37 @@
 #!/bin/bash
 set -e
 
-# Virtual display
-Xvfb :99 -screen 0 1024x768x16 &
-sleep 2
+echo "Starting Xvfb..."
 
-# Minimal window manager
+Xvfb :99 \
+    -screen 0 1024x768x16 \
+    -ac \
+    -noreset &
+
+sleep 3
+
+export DISPLAY=:99
+
+echo "Starting Openbox..."
+
 openbox &
 
-# Start noVNC on port 6080
-websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+sleep 2
 
-echo "Container ready."
-echo "Use noVNC to complete Steam login/captcha if needed."
+echo "Starting VNC server..."
 
-# Placeholder:
-# Put Taskbar Hero files in /opt/taskbarhero/game
-# Then replace the line below with:
-# wine /opt/taskbarhero/game/TBH.exe
+x11vnc \
+    -display :99 \
+    -rfbport 5900 \
+    -forever \
+    -shared \
+    -noxdamage \
+    -bg
 
-tail -f /dev/null
+sleep 3
+
+echo "Starting noVNC..."
+
+websockify \
+    --web=/usr/share/novnc/ \
+    6080 localhost:5900
