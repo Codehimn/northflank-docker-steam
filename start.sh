@@ -1,51 +1,45 @@
 #!/bin/bash
 set -e
 
-export DISPLAY=:99
 export HOME=/home/steamuser
-export XDG_RUNTIME_DIR=/tmp/runtime-steam
+export DISPLAY=:0
 
-mkdir -p "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR"
+mkdir -p /data
+mkdir -p "$HOME/.steam"
+mkdir -p "$HOME/.local/share"
 
-mkdir -p /tmp/.X11-unix
-chmod 1777 /tmp/.X11-unix
+# Use persistent Steam data
+if [ -d /data/Steam ]; then
+    ln -sfn /data/Steam "$HOME/.local/share/Steam"
+else
+    mkdir -p /data/Steam
+    ln -sfn /data/Steam "$HOME/.local/share/Steam"
+fi
 
 echo "Starting Xvfb..."
-Xvfb :99 -screen 0 1024x768x16 -ac -nolisten tcp &
-
-sleep 3
-
-echo "Starting Openbox..."
-dbus-launch openbox &
-
-sleep 3
-
-echo "Starting VNC..."
-mkdir -p ~/.vnc
-x11vnc -storepasswd "$VNC_PASSWORD" ~/.vnc/passwd
-
-x11vnc \
--display :99 \
--rfbauth ~/.vnc/passwd \
--forever \
--shared \
--rfbport 5900 &
+Xvfb :0 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
 
 sleep 2
 
+echo "Starting Openbox..."
+openbox-session >/tmp/openbox.log 2>&1 &
+
+sleep 2
+
+echo "Starting VNC..."
+x11vnc -display :0 -forever -shared -nopw -rfbport 5900 >/tmp/x11vnc.log 2>&1 &
+
 echo "Starting noVNC..."
-/opt/noVNC/utils/novnc_proxy \
---vnc localhost:5900 \
---listen 6080 &
-
-sleep 5
-
-echo "Starting Steam..."
-steam -silent &
+websockify --web=/usr/share/novnc/ 6080 localhost:5900 >/tmp/novnc.log 2>&1 &
 
 echo "READY"
-echo "Open: /vnc.html"
-echo "Password: $VNC_PASSWORD"
+echo "VNC URL: http://YOUR_NORTHFLANK_DOMAIN:6080/vnc.html"
+echo "PASSWORD: none"
 
-tail -f /dev/null
+# First run: login manually through noVNC.
+# Steam login/session remains under /data/Steam.
+steam >/tmp/steam.log 2>&1 &
+
+while true; do
+    sleep 60
+done
