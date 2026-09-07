@@ -1,25 +1,26 @@
-# TaskbarHero Northflank Docker v5
+# TaskbarHero Northflank V6
 
-Esta versión intenta arrancar Steam automáticamente.
+Esta versión corrige el fallo de build de WineHQ.
 
-Al iniciar:
-1. Arranca Ubuntu gráfico mínimo.
-2. Arranca noVNC.
-3. Abre Steam.
+Cambio principal:
+- Eliminado apt-key de WineHQ (fallaba por gpg-agent).
+- Usa paquetes oficiales Ubuntu para Wine.
+
+Incluye:
+- Ubuntu 22.04
+- Wine
+- Xvfb
+- Openbox
+- x11vnc con password
+- noVNC
+- intento de instalar Steam automáticamente
 
 Acceso:
  /vnc.html
 
-Password VNC:
+Password:
  cambiar123
 
-Objetivo:
-Entrar por navegador y realizar login/captcha de Steam.
-
-Después:
-- Guardar sesión.
-- Instalar Taskbar Hero.
-- Crear autoarranque del juego.
-
 Nota:
-Steam puede requerir ajustes dependiendo de la versión del cliente y las librerías disponibles.
+El objetivo de esta versión es tener un contenedor que construya y abra escritorio.
+Después se ajusta Steam/TBH según los errores que aparezcan.
