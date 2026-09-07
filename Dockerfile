@@ -28,8 +28,8 @@ RUN apt-get update && \
       tini \
     && rm -rf /var/lib/apt/lists/*
 
-# WineHQ official repository for Debian Forky.
-# Intentionally amd64-only at Linux level: no dpkg --add-architecture i386.
+# WineHQ official Debian Testing/Forky packages use NEW WoW64.
+# Do NOT enable Linux i386 multiarch: Northflank's kernel cannot execute IA32 ELF.
 RUN mkdir -pm755 /etc/apt/keyrings && \
     wget -qO- https://dl.winehq.org/wine-builds/winehq.key \
       | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.key && \
@@ -39,7 +39,6 @@ RUN mkdir -pm755 /etc/apt/keyrings && \
     apt-get install -y --install-recommends winehq-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Require Wine 11.x new WoW64 generation.
 RUN wine --version | tee /tmp/wine-version.txt && \
     grep -Eq 'wine-11\.' /tmp/wine-version.txt
 
@@ -47,7 +46,7 @@ RUN useradd --uid 1000 --create-home --shell /bin/bash steamuser && \
     mkdir -p /opt/installers /opt/prefix-template /opt/taskbarhero /opt/novnc /data && \
     chown -R steamuser:steamuser /opt/prefix-template /opt/taskbarhero /data
 
-# Official Steam Windows installer.
+# Download the official Windows Steam bootstrapper.
 RUN curl -fL \
       --retry 5 \
       --retry-all-errors \
@@ -58,35 +57,38 @@ RUN curl -fL \
     file /opt/installers/SteamSetup.exe | tee /tmp/steamsetup-file.txt && \
     grep -qi 'PE32' /tmp/steamsetup-file.txt
 
-# Build and test a new-WoW64 Wine prefix.
+# IMPORTANT:
+# New WoW64 runs 32-bit Windows programs from a 64-bit Wine prefix.
+# Therefore create a normal 64-bit prefix, NOT WINEARCH=win32.
 RUN gosu steamuser env \
       HOME=/home/steamuser \
       WINEPREFIX=/opt/prefix-template \
-      WINEARCH=wow64 \
+      WINEARCH=win64 \
       WINEDEBUG=-all \
       WINEDLLOVERRIDES="mscoree,mshtml=" \
       xvfb-run -a wineboot -u && \
     gosu steamuser env \
       HOME=/home/steamuser \
       WINEPREFIX=/opt/prefix-template \
-      WINEARCH=wow64 \
+      WINEARCH=win64 \
       WINEDEBUG=-all \
-      xvfb-run -a wine 'C:\windows\syswow64\cmd.exe' /c echo WOW64_OK \
-      | tee /tmp/wow64-test.txt && \
-    grep -q 'WOW64_OK' /tmp/wow64-test.txt
+      wineserver -w && \
+    test -f /opt/prefix-template/system.reg
 
-# Install Steam for Windows into the template prefix at build time.
+# REAL WoW64 TEST:
+# SteamSetup.exe is a 32-bit Windows PE executable. If Wine can execute it from
+# this 64-bit prefix and Steam.exe appears, new WoW64 is doing the job we need.
 RUN gosu steamuser env \
       HOME=/home/steamuser \
       WINEPREFIX=/opt/prefix-template \
-      WINEARCH=wow64 \
+      WINEARCH=win64 \
       WINEDEBUG=-all \
       WINEDLLOVERRIDES="mscoree,mshtml=" \
       xvfb-run -a wine /opt/installers/SteamSetup.exe /S && \
     gosu steamuser env \
       HOME=/home/steamuser \
       WINEPREFIX=/opt/prefix-template \
-      WINEARCH=wow64 \
+      WINEARCH=win64 \
       WINEDEBUG=-all \
       wineserver -w && \
     test -f "/opt/prefix-template/drive_c/Program Files (x86)/Steam/Steam.exe"
@@ -99,7 +101,6 @@ RUN cp -a /usr/share/novnc/. /opt/novnc/ && \
       '<a href="/vnc.html?autoconnect=1&resize=scale">Open noVNC</a>' \
       > /opt/novnc/index.html
 
-# All files are deliberately flat at repository root.
 COPY entrypoint.sh /opt/taskbarhero/entrypoint.sh
 COPY start.sh /opt/taskbarhero/start.sh
 COPY steam-watchdog.sh /opt/taskbarhero/steam-watchdog.sh
@@ -112,7 +113,7 @@ RUN chmod +x /opt/taskbarhero/*.sh && \
 ENV DISPLAY=:99 \
     HOME=/home/steamuser \
     WINEPREFIX=/data/wineprefix \
-    WINEARCH=wow64 \
+    WINEARCH=win64 \
     WINEDEBUG=-all \
     LIBGL_ALWAYS_SOFTWARE=1 \
     GALLIUM_DRIVER=llvmpipe \

@@ -4,7 +4,7 @@ set -Eeuo pipefail
 export DISPLAY="${DISPLAY:-:99}"
 export HOME="${HOME:-/home/steamuser}"
 export WINEPREFIX="${WINEPREFIX:-/data/wineprefix}"
-export WINEARCH=wow64
+export WINEARCH=win64
 export WINEDEBUG="${WINEDEBUG:--all}"
 export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
 export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
@@ -47,7 +47,7 @@ log "Kernel: $(uname -m) $(uname -r)"
 log "Wine prefix: $WINEPREFIX"
 
 if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
-  log "Creating persistent prefix from image template..."
+  log "Creating persistent Wine/Steam prefix from tested image template..."
   mkdir -p "$WINEPREFIX"
   cp -a /opt/prefix-template/. "$WINEPREFIX/"
 fi
@@ -118,10 +118,9 @@ kill -0 "$NOVNC_PID" 2>/dev/null || {
 }
 
 log "noVNC READY"
-log "Open / or /vnc.html?autoconnect=1&resize=scale"
 log "VNC password: $VNC_PASSWORD"
 
-log "Updating Wine prefix..."
+log "Refreshing persistent Wine prefix..."
 wineboot -u >"$LOG_DIR/wineboot.log" 2>&1 || {
   tail -n 100 "$LOG_DIR/wineboot.log" || true
   die "wineboot failed."
@@ -131,9 +130,9 @@ wineserver -w || true
 STEAM_EXE="$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
 
 if [[ ! -f "$STEAM_EXE" ]]; then
-  log "Steam.exe missing. Reinstalling Steam Windows bootstrapper..."
+  log "Steam.exe missing in persistent prefix. Reinstalling bootstrapper..."
   wine /opt/installers/SteamSetup.exe /S >"$LOG_DIR/steam-installer.log" 2>&1 || {
-    tail -n 100 "$LOG_DIR/steam-installer.log" || true
+    tail -n 120 "$LOG_DIR/steam-installer.log" || true
     die "SteamSetup.exe failed."
   }
   wineserver -w || true
@@ -144,6 +143,6 @@ fi
 log "Starting Steam Windows watchdog..."
 /opt/taskbarhero/steam-watchdog.sh >>"$LOG_DIR/watchdog.log" 2>&1 &
 
-log "Steam is starting. Open noVNC to reach the login UI."
+log "Steam is starting. Open noVNC to reach the login window."
 
 wait "$NOVNC_PID"

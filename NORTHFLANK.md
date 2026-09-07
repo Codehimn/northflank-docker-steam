@@ -1,29 +1,17 @@
-# Northflank setup
+# Northflank v12
 
-1. Delete the old repository contents.
-2. Extract THIS ZIP.
-3. Upload every extracted file directly to the repository root.
-4. Verify that `launch-taskbarhero.sh` is visible beside `Dockerfile`.
-5. Do not upload the ZIP itself as the repository content.
-6. Build from the root Dockerfile.
-7. Expose port 6080 as HTTP.
-8. Recommended: mount persistent storage at `/data`.
-9. Deploy.
-10. Open the generated public URL.
+1. Delete every old repository file.
+2. Extract this ZIP.
+3. Put ALL extracted files directly in repo root.
+4. Build with Dockerfile.
+5. Expose 6080 as HTTP.
+6. Strongly recommended: persistent volume mounted at /data.
+7. Deploy.
+8. Open the public URL.
+9. Enter VNC password: cambia12.
+10. Steam Windows should self-update and then show login.
 
-Default VNC password:
-cambia12
-
-If you use GitHub, the repository should visually look like:
-
-Dockerfile
-entrypoint.sh
-start.sh
-steam-watchdog.sh
-install-taskbarhero.sh
-launch-taskbarhero.sh
-README.md
-NORTHFLANK.md
-.dockerignore
-
-There should be NO `scripts/` directory.
+Important:
+Do not add Linux i386 architecture.
+Do not install Steam Linux.
+This image uses WineHQ new WoW64 from Debian Forky.

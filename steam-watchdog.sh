@@ -4,7 +4,7 @@ set -Eeuo pipefail
 export DISPLAY="${DISPLAY:-:99}"
 export HOME="${HOME:-/home/steamuser}"
 export WINEPREFIX="${WINEPREFIX:-/data/wineprefix}"
-export WINEARCH=wow64
+export WINEARCH=win64
 export WINEDEBUG="${WINEDEBUG:--all}"
 export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
 export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"

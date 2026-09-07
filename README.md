@@ -1,28 +1,29 @@
-# Taskbar Hero / Northflank - Steam Windows + Wine 11 WoW64
+# Taskbar Hero / Northflank v12
 
-IMPORTANT:
-This repository is intentionally FLAT. Do not create a `scripts/` directory.
-All files must be kept in the repository root exactly as they appear in this ZIP.
+This repo is intentionally flat. Put every file in the repository root.
 
-Required root files:
-
-- Dockerfile
-- entrypoint.sh
-- start.sh
-- steam-watchdog.sh
-- install-taskbarhero.sh
-- launch-taskbarhero.sh
-- README.md
-- NORTHFLANK.md
-- .dockerignore
+What v12 fixes:
+- Do NOT create/test the prefix with WINEARCH=wow64.
+- Create a normal 64-bit prefix with WINEARCH=win64.
+- Debian Forky WineHQ packages already use NEW WoW64.
+- Use the actual 32-bit SteamSetup.exe installer as the WoW64 test.
+- The Docker build only succeeds if SteamSetup.exe runs and Steam.exe is created.
 
 Northflank:
-- Expose container port 6080
-- Protocol: HTTP
-- Recommended persistent volume mount: /data
+- Port 6080
+- Protocol HTTP
+- Persistent volume recommended at /data
 
 Default VNC password:
 cambia12
 
-This version uses Windows Steam through Wine 11 new WoW64 and does not use
-Steam for Linux or Linux i386 packages.
+Repo root files:
+Dockerfile
+entrypoint.sh
+start.sh
+steam-watchdog.sh
+install-taskbarhero.sh
+launch-taskbarhero.sh
+README.md
+NORTHFLANK.md
+.dockerignore
