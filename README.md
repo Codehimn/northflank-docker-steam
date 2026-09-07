@@ -1,34 +1,25 @@
-# Taskbar Hero Northflank Docker v4
+# TaskbarHero Northflank Docker v5
 
-Versión mejorada para primera instalación.
+Esta versión intenta arrancar Steam automáticamente.
 
-Incluye:
-- Ubuntu 22.04 minimal
-- Xvfb virtual display
-- Openbox ligero
-- x11vnc con password
-- noVNC web
-- limpieza de temporales
-- logs separados
-- creación segura del password
+Al iniciar:
+1. Arranca Ubuntu gráfico mínimo.
+2. Arranca noVNC.
+3. Abre Steam.
 
 Acceso:
+ /vnc.html
 
-/vnc.html
+Password VNC:
+ cambiar123
 
-Password:
+Objetivo:
+Entrar por navegador y realizar login/captcha de Steam.
 
-cambiar123
+Después:
+- Guardar sesión.
+- Instalar Taskbar Hero.
+- Crear autoarranque del juego.
 
-Mejoras respecto a v3:
-- No recrea password cada reinicio.
-- Logs para diagnóstico.
-- Más tolerante a reinicios.
-- Menos basura temporal.
-- Instalación más ligera.
-
-Siguiente optimización:
-Después de entrar y dejar Steam autenticado:
-1. Persistir carpeta Steam.
-2. Arrancar directamente Taskbar Hero.
-3. Eliminar noVNC/Openbox para bajar RAM.
+Nota:
+Steam puede requerir ajustes dependiendo de la versión del cliente y las librerías disponibles.
