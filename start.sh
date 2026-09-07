@@ -1,167 +1,158 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-export DISPLAY=:99
-export HOME=/home/steamuser
-export PATH="/usr/games:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-export LIBGL_ALWAYS_SOFTWARE=1
+export DISPLAY="${DISPLAY:-:99}"
+export HOME="${HOME:-/home/steamuser}"
+export WINEPREFIX="${WINEPREFIX:-/data/wineprefix}"
+export WINEARCH=wow64
+export WINEDEBUG="${WINEDEBUG:--all}"
+export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
+export MESA_LOADER_DRIVER_OVERRIDE="${MESA_LOADER_DRIVER_OVERRIDE:-llvmpipe}"
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 
-VNC_PASSWORD="${VNC_PASSWORD:-cambiar123}"
-VNC_PASSFILE="$HOME/.vnc/passwd"
-STEAM_BIN="/usr/games/steam"
+LOG_DIR=/data/logs
+mkdir -p "$LOG_DIR" "$HOME/.vnc"
 
 log() {
   printf '[%s] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
 }
 
+die() {
+  log "ERROR: $*"
+  exit 1
+}
+
 cleanup() {
+  log "Stopping child processes..."
   jobs -pr | xargs -r kill 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$HOME/.vnc"
-
-if [[ ! -f "$VNC_PASSFILE" ]]; then
-  log "Creating VNC password..."
-  x11vnc -storepasswd "$VNC_PASSWORD" "$VNC_PASSFILE" >/dev/null
-  chmod 600 "$VNC_PASSFILE"
+# Classic VNC authentication effectively uses 8 characters.
+VNC_PASSWORD="${VNC_PASSWORD:-cambia12}"
+if (( ${#VNC_PASSWORD} > 8 )); then
+  log "VNC_PASSWORD is longer than 8 characters; using the first 8."
+  VNC_PASSWORD="${VNC_PASSWORD:0:8}"
+fi
+if (( ${#VNC_PASSWORD} < 4 )); then
+  die "VNC_PASSWORD must have at least 4 characters."
 fi
 
+VNC_PASSFILE="$HOME/.vnc/passwd"
+rm -f "$VNC_PASSFILE"
+x11vnc -storepasswd "$VNC_PASSWORD" "$VNC_PASSFILE" >/dev/null
+chmod 600 "$VNC_PASSFILE"
+
+log "Wine version: $(wine --version)"
+log "Kernel: $(uname -m) $(uname -r)"
+log "Wine prefix: $WINEPREFIX"
+
+# First run: copy the prefix in which SteamSetup.exe was already installed.
+if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
+  log "Creating persistent Wine/Steam prefix from image template..."
+  mkdir -p "$WINEPREFIX"
+  cp -a /opt/prefix-template/. "$WINEPREFIX/"
+fi
+
+# Make sure prefix files are ours even after a restored volume.
+chmod -R u+rwX "$WINEPREFIX" 2>/dev/null || true
+
 log "Starting Xvfb..."
-Xvfb :99 -screen 0 1024x768x16 -ac -nolisten tcp -noreset >/tmp/xvfb.log 2>&1 &
+Xvfb "$DISPLAY" \
+  -screen 0 1024x768x16 \
+  -ac \
+  -nolisten tcp \
+  -noreset \
+  >"$LOG_DIR/xvfb.log" 2>&1 &
 XVFB_PID=$!
 
-for i in $(seq 1 30); do
-  if xdpyinfo -display :99 >/dev/null 2>&1; then
+for i in $(seq 1 40); do
+  if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
     log "Xvfb ready."
     break
   fi
-  if ! kill -0 "$XVFB_PID" 2>/dev/null; then
-    log "ERROR: Xvfb exited."
-    cat /tmp/xvfb.log || true
-    exit 1
-  fi
+  kill -0 "$XVFB_PID" 2>/dev/null || {
+    tail -n 80 "$LOG_DIR/xvfb.log" || true
+    die "Xvfb exited."
+  }
+  [[ "$i" != "40" ]] || die "Xvfb did not become ready."
   sleep 0.5
 done
 
 log "Starting D-Bus + Openbox..."
-dbus-launch openbox >/tmp/openbox.log 2>&1 &
+dbus-launch openbox >"$LOG_DIR/openbox.log" 2>&1 &
 
 log "Starting x11vnc..."
 x11vnc \
-  -display :99 \
+  -display "$DISPLAY" \
   -rfbport 5900 \
   -rfbauth "$VNC_PASSFILE" \
   -forever \
   -shared \
   -noxdamage \
   -localhost \
-  >/tmp/x11vnc.log 2>&1 &
+  >"$LOG_DIR/x11vnc.log" 2>&1 &
 X11VNC_PID=$!
 
-for i in $(seq 1 30); do
+for i in $(seq 1 40); do
   if (echo >/dev/tcp/127.0.0.1/5900) >/dev/null 2>&1; then
     log "x11vnc ready."
     break
   fi
-  if ! kill -0 "$X11VNC_PID" 2>/dev/null; then
-    log "ERROR: x11vnc exited."
-    cat /tmp/x11vnc.log || true
-    exit 1
-  fi
+  kill -0 "$X11VNC_PID" 2>/dev/null || {
+    tail -n 80 "$LOG_DIR/x11vnc.log" || true
+    die "x11vnc exited."
+  }
+  [[ "$i" != "40" ]] || die "VNC port 5900 did not open."
   sleep 0.5
 done
 
-log "Starting noVNC :6080..."
-websockify --web=/usr/share/novnc/ 6080 127.0.0.1:5900 >/tmp/novnc.log 2>&1 &
+log "Starting noVNC on HTTP :6080..."
+websockify \
+  --web=/opt/novnc \
+  6080 127.0.0.1:5900 \
+  >"$LOG_DIR/novnc.log" 2>&1 &
 NOVNC_PID=$!
+
 sleep 2
-
-log "noVNC READY: /vnc.html"
-log "VNC PASSWORD: $VNC_PASSWORD"
-
-# ---- CRITICAL PLATFORM TEST ----
-log "=== PLATFORM CHECK ==="
-log "Kernel architecture: $(uname -m)"
-log "Kernel: $(uname -r)"
-
-if [[ -e /lib/ld-linux.so.2 ]]; then
-  log "32-bit loader: $(file -b /lib/ld-linux.so.2)"
-else
-  log "ERROR: /lib/ld-linux.so.2 is missing."
-fi
-
-if /lib/ld-linux.so.2 --help >/tmp/ia32-test.log 2>&1; then
-  log "IA32 TEST: OK. Kernel can execute 32-bit x86 ELF binaries."
-else
-  RC=$?
-  log "IA32 TEST: FAILED (exit $RC)."
-  log "This runtime cannot execute the 32-bit Linux component required by Steam."
-  log "32-bit test output:"
-  tail -n 20 /tmp/ia32-test.log || true
-  log "Steam Linux cannot bootstrap correctly in this runtime unless 32-bit execution is enabled."
-  log "noVNC will remain available."
-  wait "$NOVNC_PID"
-  exit 0
-fi
-
-if [[ ! -x "$STEAM_BIN" ]]; then
-  log "ERROR: Steam launcher missing: $STEAM_BIN"
-  wait "$NOVNC_PID"
-  exit 0
-fi
-
-# Remove only incomplete bootstrap files from previous failed launches.
-STEAM_ROOT="$HOME/.steam/debian-installation"
-mkdir -p "$STEAM_ROOT"
-
-log "Cleaning incomplete Steam bootstrap fragments..."
-find "$STEAM_ROOT" -type f \( -name '*.part' -o -name 'steam-runtime.tar.xz.part*' \) -delete 2>/dev/null || true
-
-# If the previously downloaded bootstrap executable is not a valid x86 ELF, remove it.
-BOOTSTRAP="$STEAM_ROOT/ubuntu12_32/steam"
-if [[ -e "$BOOTSTRAP" ]]; then
-  DESC="$(file -b "$BOOTSTRAP" || true)"
-  log "Existing Steam bootstrap: $DESC"
-  if [[ "$DESC" != *"ELF 32-bit"* ]]; then
-    log "Invalid/corrupt bootstrap detected. Removing ubuntu12_32 for a clean retry."
-    rm -rf "$STEAM_ROOT/ubuntu12_32"
-  fi
-fi
-
-run_steam() {
-  local attempt="$1"
-  log "Starting Steam attempt $attempt..."
-  rm -f /tmp/steam.log
-  "$STEAM_BIN" -no-cef-sandbox >/tmp/steam.log 2>&1 &
-  STEAM_PID=$!
-  sleep 12
-
-  if kill -0 "$STEAM_PID" 2>/dev/null; then
-    log "Steam is running. Open noVNC and log in."
-    return 0
-  fi
-
-  log "Steam exited during attempt $attempt."
-  tail -n 100 /tmp/steam.log || true
-  return 1
+kill -0 "$NOVNC_PID" 2>/dev/null || {
+  cat "$LOG_DIR/novnc.log" || true
+  die "noVNC failed."
 }
 
-if ! run_steam 1; then
-  log "Preparing one clean retry..."
-  find "$STEAM_ROOT" -type f \( -name '*.part' -o -name 'steam-runtime.tar.xz.part*' \) -delete 2>/dev/null || true
+log "noVNC READY"
+log "Open / or /vnc.html?autoconnect=1&resize=scale"
+log "VNC password: $VNC_PASSWORD"
 
-  if [[ -e "$BOOTSTRAP" ]]; then
-    log "Bootstrap after failure: $(file -b "$BOOTSTRAP" || true)"
-  fi
+# Refresh the prefix after image updates.
+log "Updating Wine prefix..."
+wineboot -u >"$LOG_DIR/wineboot.log" 2>&1 || {
+  tail -n 100 "$LOG_DIR/wineboot.log" || true
+  die "wineboot failed."
+}
+wineserver -w || true
 
-  sleep 3
+STEAM_EXE="$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
 
-  if ! run_steam 2; then
-    log "Steam still failed after clean retry."
-    log "The last /tmp/steam.log above is the useful diagnostic."
-    log "noVNC remains available."
-  fi
+# Recovery path: if a volume contains a prefix but Steam itself is absent,
+# reinstall the Windows bootstrapper silently.
+if [[ ! -f "$STEAM_EXE" ]]; then
+  log "Steam.exe missing. Reinstalling Windows Steam bootstrapper..."
+  wine /opt/installers/SteamSetup.exe /S >"$LOG_DIR/steam-installer.log" 2>&1 || {
+    tail -n 100 "$LOG_DIR/steam-installer.log" || true
+    die "SteamSetup.exe failed."
+  }
+  wineserver -w || true
 fi
 
+[[ -f "$STEAM_EXE" ]] || die "Steam.exe still missing after installation."
+
+log "Starting Steam Windows watchdog..."
+/opt/taskbarhero/steam-watchdog.sh >>"$LOG_DIR/watchdog.log" 2>&1 &
+WATCHDOG_PID=$!
+
+log "Steam is starting. Open noVNC; after Steam self-updates you should reach the login window."
+
+# noVNC is the service's foreground lifetime.
 wait "$NOVNC_PID"
