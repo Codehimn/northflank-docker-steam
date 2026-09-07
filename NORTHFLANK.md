@@ -1,21 +1,22 @@
-# Northflank setup v13
+# Northflank v14
 
-Repository root must contain:
-- Dockerfile
-- entrypoint.sh
-- start.sh
-- install-steam.sh
-- steam-watchdog.sh
-- install-taskbarhero.sh
-- launch-taskbarhero.sh
-- README.md
-- NORTHFLANK.md
-- .dockerignore
+Put all files directly in repository root.
 
-Northflank:
-- expose 6080 as HTTP
-- mount persistent storage at /data if available
-- default VNC password: cambia12
+Expose:
+- port 6080
+- protocol HTTP
 
-The build intentionally does NOT install Steam anymore.
-Steam installation occurs only after noVNC is already running.
+Recommended persistent volume:
+- /data
+
+Default VNC password:
+- cambia12
+
+The most important next log is:
+
+=== WINDOWS PE COMPATIBILITY CHECK ===
+PE64 TEST: ...
+PE32 TEST: ...
+
+If PE32 is OK, this version also tries to bypass SteamSetup.exe by extracting
+the Steam bootstrapper directly.

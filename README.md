@@ -1,41 +1,29 @@
-# Taskbar Hero / Northflank v13 - fail-safe runtime installer
+# Taskbar Hero / Northflank v14
 
-This repository is FLAT. Every file must be in the repository root.
+This version does not assume SteamSetup.exe is the first thing Wine should run.
 
-## What changed
+Runtime sequence:
 
-The Docker build no longer tries to install Steam.
+1. Start noVNC.
+2. Run a tiny 64-bit Windows EXE compiled in the Docker build.
+3. Run a tiny 32-bit Windows EXE compiled in the Docker build.
+4. If PE32 fails, stop attempting Steam and keep noVNC alive.
+5. If PE32 works, try to extract Steam.exe directly from SteamSetup.exe with 7-Zip.
+6. If extraction works, bypass the Windows installer completely.
+7. If extraction fails, run SteamSetup.exe with detailed Wine loader/SEH logs.
 
-Build-time work is limited to things that are deterministic:
-- install WineHQ Wine 11
-- download official SteamSetup.exe
-- validate it is a Windows PE32 executable
-- create a clean 64-bit Wine prefix
+Important log lines:
+- PE64 TEST: OK/FAILED
+- PE32 TEST: OK/FAILED
 
-At runtime:
-1. Xvfb starts.
-2. Openbox starts.
-3. x11vnc starts.
-4. noVNC starts.
-5. Only then does SteamSetup.exe run.
-6. Silent installation is attempted twice.
-7. The script searches the entire Wine C: drive for Steam.exe instead of
-   assuming a single installation path.
-8. Installer exit codes are not trusted as the sole success signal.
-9. If silent installation still fails, the normal Steam installer is opened
-   visibly in noVNC.
-10. noVNC remains alive instead of crashing the service.
+Logs:
+- /data/logs/pe64-test.log
+- /data/logs/pe32-test.log
+- /data/logs/steam-extract.log
+- /data/logs/steam-installer.log
+- /data/logs/steam.log
 
-## Northflank
-- Port: 6080
-- Protocol: HTTP
-- Recommended persistent volume: /data
-
-Default VNC password:
-cambia12
-
-## Logs
-/data/logs/steam-installer.log
-/data/logs/steam-installer-visible.log
-/data/logs/steam.log
-/data/logs/watchdog.log
+Northflank:
+- 6080 HTTP
+- persistent volume recommended at /data
+- VNC password: cambia12
