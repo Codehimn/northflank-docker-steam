@@ -2,10 +2,11 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:99
+ENV TZ=UTC
 
 RUN dpkg --add-architecture i386 && \
     apt update && \
-    apt install -y \
+    apt install -y --no-install-recommends \
     xvfb \
     openbox \
     x11vnc \
@@ -17,7 +18,12 @@ RUN dpkg --add-architecture i386 && \
     curl \
     unzip \
     procps \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    supervisor \
+    && apt clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+RUN mkdir -p /root/.vnc /opt/taskbarhero/logs
 
 WORKDIR /opt/taskbarhero
 
