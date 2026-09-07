@@ -4,14 +4,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV HOME=/home/steamuser
 ENV DISPLAY=:0
 
-# Steam needs i386 libraries
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
-    curl \
     wget \
-    gnupg \
+    curl \
     xvfb \
     openbox \
     x11vnc \
@@ -26,10 +24,10 @@ RUN dpkg --add-architecture i386 && \
     libxtst6:i386 \
     libxrandr2:i386 \
     libxinerama1:i386 \
-    libxcursor1:i386 && \
+    libxcursor1:i386 \
+    apt-utils && \
     rm -rf /var/lib/apt/lists/*
 
-# Install official Steam client during build as root
 RUN wget -qO /tmp/steam.deb https://cdn.cloudflare.steamstatic.com/client/installer/steam.deb && \
     dpkg -i /tmp/steam.deb || true && \
     apt-get update && \
@@ -42,7 +40,6 @@ RUN mkdir -p /tmp/.X11-unix && \
 
 RUN useradd -m -s /bin/bash steamuser && \
     mkdir -p /data/Steam \
-             /data/.steam \
              /home/steamuser/.steam \
              /home/steamuser/.local/share && \
     chown -R steamuser:steamuser /data /home/steamuser
