@@ -24,19 +24,17 @@ die() {
 }
 
 cleanup() {
-  log "Stopping child processes..."
   jobs -pr | xargs -r kill 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-# Classic VNC authentication effectively uses 8 characters.
 VNC_PASSWORD="${VNC_PASSWORD:-cambia12}"
 if (( ${#VNC_PASSWORD} > 8 )); then
-  log "VNC_PASSWORD is longer than 8 characters; using the first 8."
+  log "VNC_PASSWORD > 8 chars; using first 8."
   VNC_PASSWORD="${VNC_PASSWORD:0:8}"
 fi
 if (( ${#VNC_PASSWORD} < 4 )); then
-  die "VNC_PASSWORD must have at least 4 characters."
+  die "VNC_PASSWORD must be at least 4 characters."
 fi
 
 VNC_PASSFILE="$HOME/.vnc/passwd"
@@ -48,14 +46,12 @@ log "Wine version: $(wine --version)"
 log "Kernel: $(uname -m) $(uname -r)"
 log "Wine prefix: $WINEPREFIX"
 
-# First run: copy the prefix in which SteamSetup.exe was already installed.
 if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
-  log "Creating persistent Wine/Steam prefix from image template..."
+  log "Creating persistent prefix from image template..."
   mkdir -p "$WINEPREFIX"
   cp -a /opt/prefix-template/. "$WINEPREFIX/"
 fi
 
-# Make sure prefix files are ours even after a restored volume.
 chmod -R u+rwX "$WINEPREFIX" 2>/dev/null || true
 
 log "Starting Xvfb..."
@@ -125,7 +121,6 @@ log "noVNC READY"
 log "Open / or /vnc.html?autoconnect=1&resize=scale"
 log "VNC password: $VNC_PASSWORD"
 
-# Refresh the prefix after image updates.
 log "Updating Wine prefix..."
 wineboot -u >"$LOG_DIR/wineboot.log" 2>&1 || {
   tail -n 100 "$LOG_DIR/wineboot.log" || true
@@ -135,10 +130,8 @@ wineserver -w || true
 
 STEAM_EXE="$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
 
-# Recovery path: if a volume contains a prefix but Steam itself is absent,
-# reinstall the Windows bootstrapper silently.
 if [[ ! -f "$STEAM_EXE" ]]; then
-  log "Steam.exe missing. Reinstalling Windows Steam bootstrapper..."
+  log "Steam.exe missing. Reinstalling Steam Windows bootstrapper..."
   wine /opt/installers/SteamSetup.exe /S >"$LOG_DIR/steam-installer.log" 2>&1 || {
     tail -n 100 "$LOG_DIR/steam-installer.log" || true
     die "SteamSetup.exe failed."
@@ -146,13 +139,11 @@ if [[ ! -f "$STEAM_EXE" ]]; then
   wineserver -w || true
 fi
 
-[[ -f "$STEAM_EXE" ]] || die "Steam.exe still missing after installation."
+[[ -f "$STEAM_EXE" ]] || die "Steam.exe missing after installation."
 
 log "Starting Steam Windows watchdog..."
 /opt/taskbarhero/steam-watchdog.sh >>"$LOG_DIR/watchdog.log" 2>&1 &
-WATCHDOG_PID=$!
 
-log "Steam is starting. Open noVNC; after Steam self-updates you should reach the login window."
+log "Steam is starting. Open noVNC to reach the login UI."
 
-# noVNC is the service's foreground lifetime.
 wait "$NOVNC_PID"

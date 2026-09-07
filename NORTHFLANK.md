@@ -1,30 +1,29 @@
-# Northflank checklist
+# Northflank setup
 
-1. Put all files from this ZIP at the root of a fresh repository.
-2. Create a Northflank build/service from the Dockerfile.
-3. Expose container port `6080` as `HTTP`.
-4. Set `VNC_PASSWORD` to an 8-character password if you do not want the default.
-5. Recommended: attach persistent storage mounted at `/data`.
-6. Deploy.
-7. Open the public URL. It redirects to noVNC.
-8. Enter the VNC password.
-9. Steam for Windows should self-update and then show its login UI.
-10. Log in normally and complete Steam Guard/captcha if requested.
+1. Delete the old repository contents.
+2. Extract THIS ZIP.
+3. Upload every extracted file directly to the repository root.
+4. Verify that `launch-taskbarhero.sh` is visible beside `Dockerfile`.
+5. Do not upload the ZIP itself as the repository content.
+6. Build from the root Dockerfile.
+7. Expose port 6080 as HTTP.
+8. Recommended: mount persistent storage at `/data`.
+9. Deploy.
+10. Open the generated public URL.
 
-Default VNC password: `cambia12`
+Default VNC password:
+cambia12
 
-Useful environment variables:
+If you use GitHub, the repository should visually look like:
 
-- `LOW_MEMORY=1`
-- `STEAM_START_SILENT=0`
-- `VNC_PASSWORD=cambia12`
+Dockerfile
+entrypoint.sh
+start.sh
+steam-watchdog.sh
+install-taskbarhero.sh
+launch-taskbarhero.sh
+README.md
+NORTHFLANK.md
+.dockerignore
 
-After login, you may change `STEAM_START_SILENT=1`.
-
-If Steam does not appear, inspect:
-
-`/data/logs/steam.log`
-
-and:
-
-`/data/logs/watchdog.log`
+There should be NO `scripts/` directory.

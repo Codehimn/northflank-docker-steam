@@ -26,28 +26,24 @@ steam_running() {
 launch_steam() {
   local -a flags=()
 
-  # CEF sandbox/GPU paths are common trouble spots in restricted containers.
   if [[ "${LOW_MEMORY:-1}" == "1" ]]; then
     flags+=("-no-cef-sandbox" "-cef-disable-gpu" "-cef-disable-gpu-compositing")
   fi
 
-  # After the first successful login you can set STEAM_START_SILENT=1.
   if [[ "${STEAM_START_SILENT:-0}" == "1" ]]; then
     flags+=("-silent")
   fi
 
-  log "Launching Windows Steam: ${flags[*]:-no extra flags}"
+  log "Launching Steam Windows: ${flags[*]:-no extra flags}"
   wine "$STEAM_EXE" "${flags[@]}" >>"$LOG_DIR/steam.log" 2>&1 &
 }
 
 launch_steam
-
-# Give Steam enough room to self-update/restart without us fighting it.
 sleep 60
 
 while true; do
   if ! steam_running; then
-    log "Steam process not found. Waiting 15s before one recovery launch..."
+    log "Steam process missing; waiting 15 seconds before restart..."
     sleep 15
     if ! steam_running; then
       launch_steam

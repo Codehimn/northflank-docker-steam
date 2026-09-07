@@ -10,10 +10,10 @@ export WINEDEBUG="${WINEDEBUG:--all}"
 APPID="${TASKBARHERO_APPID:-3678970}"
 STEAM_EXE="$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
 
-if [[ ! -f "$STEAM_EXE" ]]; then
+[[ -f "$STEAM_EXE" ]] || {
   echo "Steam.exe not found at: $STEAM_EXE" >&2
   exit 1
-fi
+}
 
 echo "Launching Taskbar Hero through Steam (AppID $APPID)..."
 wine "$STEAM_EXE" -applaunch "$APPID"
