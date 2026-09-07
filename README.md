@@ -1,65 +1,47 @@
-# Taskbar Hero / Northflank v8
+# Taskbar Hero / Northflank v9
 
-## Qué corrige
+Esta versión diagnostica el error real antes de seguir reintentando Steam.
 
-Tu log mostraba que Ubuntu sí alcanzó a hacer:
+## Por qué
 
-- `Setting up steam:i386`
-- `Setting up steam-installer`
+Steam para Linux todavía usa un bootstrap x86 de 32 bits en:
+`~/.steam/debian-installation/ubuntu12_32/steam`
 
-pero el comando de instalación terminó con un error posterior al escribir
-`/var/lib/apt/extended_states`. El script antiguo interpretaba cualquier
-código distinto de cero como "Steam package unavailable", aunque Steam ya
-había sido desempaquetado/configurado.
+El error:
+`Exec format error`
 
-Además, el launcher de Steam en Ubuntu está en:
+puede ocurrir si el kernel del runtime no permite ejecutar binarios ELF x86
+de 32 bits. Instalar paquetes i386 no basta: el kernel también debe soportarlos.
 
-`/usr/games/steam`
+v9 ejecuta automáticamente:
 
-y el script antiguo comprobaba `command -v steam`. En un contenedor, `/usr/games`
-no siempre está en PATH, por lo que podía decir "Steam command not found"
-aunque el launcher existiera.
+`/lib/ld-linux.so.2 --help`
 
-## Solución v8
+Si funciona:
+- imprime `IA32 TEST: OK`
+- limpia archivos `.part`
+- valida el bootstrap descargado
+- reintenta Steam hasta 2 veces
 
-- Steam se instala durante el BUILD.
-- No se ejecuta apt/dpkg durante el arranque.
-- Se añade `/usr/games` al PATH.
-- Se inicia explícitamente `/usr/games/steam`.
-- Se instala `udev`, por lo que existe `udevadm`.
-- Se usa un usuario normal `steamuser`.
-- Se instala `x11-utils` para comprobar Xvfb.
-- Se añade una sesión D-Bus mínima.
-- Se fuerza renderizado Mesa por software.
-- Steam se inicia con `-no-cef-sandbox`.
-- noVNC sigue disponible aunque Steam salga pronto.
+Si falla:
+- imprime `IA32 TEST: FAILED`
+- deja noVNC funcionando
+- evita descargar/reextraer Steam en bucle
 
 ## Northflank
 
-Puerto:
-- 6080
-- HTTP
+Puerto: 6080 HTTP
+Ruta: /vnc.html
+Password: cambiar123
 
-Ruta:
-- `/vnc.html`
+## Qué línea necesito del próximo log
 
-Contraseña VNC:
-- `cambiar123`
+Busca y copia solamente desde:
 
-Puedes cambiarla con:
-`VNC_PASSWORD=otra_clave`
+`=== PLATFORM CHECK ===`
 
-## Persistencia
+hasta:
 
-Para conservar login, Steam y juegos entre reemplazos del contenedor,
-monta un volumen persistente en:
+`IA32 TEST: ...`
 
-`/home/steamuser`
-
-## 512 MB
-
-El escritorio mínimo es pequeño, pero el Steam moderno usa `steamwebhelper`
-(Chromium/CEF). 512 MB puede ser suficiente para el contenedor base y aun así
-Steam puede ser terminado por falta de memoria durante login/actualización.
-La meta final es autenticar e instalar primero y luego reducir procesos para
-dejar Taskbar Hero funcionando con el mínimo de RAM.
+y, si dice OK, las últimas líneas de Steam.

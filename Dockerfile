@@ -11,6 +11,7 @@ RUN dpkg --add-architecture i386 && \
       curl \
       wget \
       procps \
+      file \
       xterm \
       x11-utils \
       xvfb \
@@ -24,6 +25,7 @@ RUN dpkg --add-architecture i386 && \
       wine64 \
       wine32 \
       steam-installer \
+      libc6:i386 \
       libgl1-mesa-dri:amd64 \
       libgl1-mesa-dri:i386 \
       libgl1:amd64 \
@@ -36,7 +38,6 @@ RUN useradd -m -s /bin/bash steamuser && \
     chown -R steamuser:steamuser /home/steamuser /opt/taskbarhero
 
 WORKDIR /opt/taskbarhero
-
 COPY --chown=steamuser:steamuser start.sh /opt/taskbarhero/start.sh
 RUN chmod +x /opt/taskbarhero/start.sh
 
