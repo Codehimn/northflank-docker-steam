@@ -1,6 +1,3 @@
-.git
-.gitignore
-*.zip
 *.log
 data/
-wineprefix/
+.git

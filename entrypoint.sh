@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
-mkdir -p /data
-chown steamuser:steamuser /data
-exec gosu steamuser "$@"
+#!/bin/bash
+set -e
+chown -R steamuser:steamuser /data
+exec su - steamuser -c "/start.sh"
