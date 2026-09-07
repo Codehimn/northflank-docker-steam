@@ -4,7 +4,6 @@ set -Eeuo pipefail
 export DISPLAY="${DISPLAY:-:99}"
 export HOME="${HOME:-/home/steamuser}"
 export WINEPREFIX="${WINEPREFIX:-/data/wineprefix}"
-export WINEARCH=win64
 export WINEDEBUG="${WINEDEBUG:--all}"
 
 APPID="${TASKBARHERO_APPID:-3678970}"

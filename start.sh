@@ -4,12 +4,12 @@ set -Eeuo pipefail
 export DISPLAY="${DISPLAY:-:99}"
 export HOME="${HOME:-/home/steamuser}"
 export WINEPREFIX="${WINEPREFIX:-/data/wineprefix}"
-export WINEARCH=win64
 export WINEDEBUG="${WINEDEBUG:--all}"
 export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
 export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
 export MESA_LOADER_DRIVER_OVERRIDE="${MESA_LOADER_DRIVER_OVERRIDE:-llvmpipe}"
 export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}"
 
 LOG_DIR=/data/logs
 mkdir -p "$LOG_DIR" "$HOME/.vnc"
@@ -33,9 +33,7 @@ if (( ${#VNC_PASSWORD} > 8 )); then
   log "VNC_PASSWORD > 8 chars; using first 8."
   VNC_PASSWORD="${VNC_PASSWORD:0:8}"
 fi
-if (( ${#VNC_PASSWORD} < 4 )); then
-  die "VNC_PASSWORD must be at least 4 characters."
-fi
+(( ${#VNC_PASSWORD} >= 4 )) || die "VNC_PASSWORD must be at least 4 chars."
 
 VNC_PASSFILE="$HOME/.vnc/passwd"
 rm -f "$VNC_PASSFILE"
@@ -44,10 +42,10 @@ chmod 600 "$VNC_PASSFILE"
 
 log "Wine version: $(wine --version)"
 log "Kernel: $(uname -m) $(uname -r)"
-log "Wine prefix: $WINEPREFIX"
+log "Persistent prefix: $WINEPREFIX"
 
 if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
-  log "Creating persistent Wine/Steam prefix from tested image template..."
+  log "Copying clean Wine prefix template to persistent storage..."
   mkdir -p "$WINEPREFIX"
   cp -a /opt/prefix-template/. "$WINEPREFIX/"
 fi
@@ -105,10 +103,7 @@ for i in $(seq 1 40); do
 done
 
 log "Starting noVNC on HTTP :6080..."
-websockify \
-  --web=/opt/novnc \
-  6080 127.0.0.1:5900 \
-  >"$LOG_DIR/novnc.log" 2>&1 &
+websockify --web=/opt/novnc 6080 127.0.0.1:5900 >"$LOG_DIR/novnc.log" 2>&1 &
 NOVNC_PID=$!
 
 sleep 2
@@ -119,30 +114,25 @@ kill -0 "$NOVNC_PID" 2>/dev/null || {
 
 log "noVNC READY"
 log "VNC password: $VNC_PASSWORD"
+log "From this point onward, installer failures will NOT kill noVNC."
 
-log "Refreshing persistent Wine prefix..."
+# Refresh the prebuilt prefix, but don't make harmless update warnings fatal.
+log "Refreshing Wine prefix..."
 wineboot -u >"$LOG_DIR/wineboot.log" 2>&1 || {
-  tail -n 100 "$LOG_DIR/wineboot.log" || true
-  die "wineboot failed."
+  log "WARNING: wineboot returned non-zero; continuing with existing prefix."
+  tail -n 60 "$LOG_DIR/wineboot.log" || true
 }
-wineserver -w || true
 
-STEAM_EXE="$WINEPREFIX/drive_c/Program Files (x86)/Steam/Steam.exe"
-
-if [[ ! -f "$STEAM_EXE" ]]; then
-  log "Steam.exe missing in persistent prefix. Reinstalling bootstrapper..."
-  wine /opt/installers/SteamSetup.exe /S >"$LOG_DIR/steam-installer.log" 2>&1 || {
-    tail -n 120 "$LOG_DIR/steam-installer.log" || true
-    die "SteamSetup.exe failed."
-  }
-  wineserver -w || true
+# Install Steam only after the visible desktop/noVNC is ready.
+log "Ensuring Steam for Windows is installed..."
+if /opt/taskbarhero/install-steam.sh; then
+  log "Steam installation check: OK."
+  log "Starting Steam watchdog..."
+  /opt/taskbarhero/steam-watchdog.sh >>"$LOG_DIR/watchdog.log" 2>&1 &
+else
+  log "WARNING: Steam silent installation did not complete automatically."
+  log "A visible Steam installer has been launched in noVNC as fallback."
+  log "The container will stay alive so installation can be completed visually."
 fi
-
-[[ -f "$STEAM_EXE" ]] || die "Steam.exe missing after installation."
-
-log "Starting Steam Windows watchdog..."
-/opt/taskbarhero/steam-watchdog.sh >>"$LOG_DIR/watchdog.log" 2>&1 &
-
-log "Steam is starting. Open noVNC to reach the login window."
 
 wait "$NOVNC_PID"

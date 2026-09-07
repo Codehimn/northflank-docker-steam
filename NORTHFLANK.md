@@ -1,17 +1,21 @@
-# Northflank v12
+# Northflank setup v13
 
-1. Delete every old repository file.
-2. Extract this ZIP.
-3. Put ALL extracted files directly in repo root.
-4. Build with Dockerfile.
-5. Expose 6080 as HTTP.
-6. Strongly recommended: persistent volume mounted at /data.
-7. Deploy.
-8. Open the public URL.
-9. Enter VNC password: cambia12.
-10. Steam Windows should self-update and then show login.
+Repository root must contain:
+- Dockerfile
+- entrypoint.sh
+- start.sh
+- install-steam.sh
+- steam-watchdog.sh
+- install-taskbarhero.sh
+- launch-taskbarhero.sh
+- README.md
+- NORTHFLANK.md
+- .dockerignore
 
-Important:
-Do not add Linux i386 architecture.
-Do not install Steam Linux.
-This image uses WineHQ new WoW64 from Debian Forky.
+Northflank:
+- expose 6080 as HTTP
+- mount persistent storage at /data if available
+- default VNC password: cambia12
+
+The build intentionally does NOT install Steam anymore.
+Steam installation occurs only after noVNC is already running.
