@@ -1,22 +1,23 @@
-FROM ubuntu:24.04
+# Steam for Linux is x86_64 and still requires i386 execution.
+# Force an amd64 image even if Northflank's BuildKit worker itself is ARM.
+FROM --platform=linux/amd64 ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/steamuser \
-    DISPLAY=:0
+    DISPLAY=:0 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
-# Use Ubuntu's own Steam packaging instead of mixing Valve's repository with
-# Ubuntu packages. This package pulls the matching 64/32-bit Steam dependency
-# metapackages, which is much less fragile in a minimal container.
+# Ubuntu's Steam metapackages pull the matching host libraries.
+# Explicit core i386 packages are kept here because Steam's bootstrap is 32-bit.
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         dbus-x11 \
-        file \
         procps \
         xdg-user-dirs \
         xdg-utils \
-        bubblewrap \
         xvfb \
         openbox \
         x11vnc \
@@ -47,28 +48,26 @@ RUN dpkg --add-architecture i386 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Build-time sanity checks. Fail the image build immediately if the exact
-# 32-bit loader/libc that Steam needs are missing or cannot execute.
+# IMPORTANT:
+# BuildKit can be running through cross-architecture emulation and may be unable
+# to EXECUTE an i386 ELF even though the final x86 runtime can. Therefore these
+# build checks verify presence/packaging only; they deliberately do not execute
+# /lib/ld-linux.so.2.
 RUN test -x /usr/games/steam && \
     test -e /lib/ld-linux.so.2 && \
     test -e /lib/i386-linux-gnu/libc.so.6 && \
     dpkg-query -W -f='${Status}\n' libc6:i386 | grep -q 'install ok installed' && \
-    /lib/ld-linux.so.2 --help >/dev/null
+    dpkg-query -W -f='${Status}\n' steam-libs-i386:i386 | grep -q 'install ok installed'
 
-# On a desktop steamdeps may call apt/pkexec. Runtime here is deliberately
-# non-root and every host dependency is baked into the image, so make the
-# helper a successful no-op to prevent interactive privilege dialogs.
+# steamdeps is for interactive desktop privilege escalation via apt/pkexec.
+# All system dependencies are baked in at build time and runtime is non-root.
 RUN if [ -e /usr/bin/steamdeps ]; then ln -sf /bin/true /usr/bin/steamdeps; fi
 
-# Xvfb cannot create this directory after USER steamuser.
-RUN mkdir -p /tmp/.X11-unix && \
-    chmod 1777 /tmp/.X11-unix
+# Xvfb needs this before we drop root.
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
-RUN useradd --create-home --shell /bin/bash steamuser && \
-    mkdir -p \
-        /data/Steam \
-        /data/.steam \
-        /home/steamuser/.local/share && \
+RUN useradd --uid 1000 --create-home --shell /bin/bash steamuser && \
+    mkdir -p /data/Steam /data/.steam /home/steamuser/.local/share && \
     chown -R steamuser:steamuser /data /home/steamuser
 
 COPY start.sh /usr/local/bin/start.sh
