@@ -1,28 +1,34 @@
 #!/bin/bash
 set -eu
 
+VERSION="V13"
 export HOME=/home/steamuser
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/tmp/runtime-steamuser
 
-# Force Wine 11's new WoW64 path. The prefix itself was created as 64-bit.
-export WINEARCH=wow64
-export WINEPREFIX=/data/taskbarhero-wine-v12
+# New path means no stale v10/v11/v12 Wine prefix can interfere.
+export WINEPREFIX=/data/taskbarhero-v13
 
-# No GPU and no audio are required for the management session.
+# Wine 11 packages are already new-WoW64. Keep a normal 64-bit prefix and let
+# Wine select the right Windows architecture for each executable.
+unset WINEARCH || true
+
 export LIBGL_ALWAYS_SOFTWARE=1
 export SDL_AUDIODRIVER=dummy
-export WINEDLLOVERRIDES="winemenubuilder.exe=d"
 export WINEDEBUG=-all
 
+echo "======================================="
+echo "=== TASKBARHERO NORTHFLANK ${VERSION} ==="
+echo "======================================="
 echo "Runtime architecture: $(uname -m)"
 echo "Runtime user: $(id)"
 echo "Wine: $(wine --version)"
+echo "Persistent prefix: $WINEPREFIX"
 
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *)
-        echo "ERROR: this image requires an x86_64 Northflank node."
+        echo "ERROR: V13 requires an x86_64 Northflank node."
         exit 86
         ;;
 esac
@@ -35,22 +41,6 @@ if [ ! -w /data ]; then
     echo "UID=$(id -u) GID=$(id -g)"
     exit 88
 fi
-
-# First runtime only: copy an already-prepared Wine prefix.
-# This is just file copying, not package installation.
-if [ ! -f "$WINEPREFIX/system.reg" ]; then
-    echo "Preparing persistent Wine prefix..."
-    rm -rf "$WINEPREFIX"
-    mkdir -p "$WINEPREFIX"
-    cp -a /opt/wineprefix-template/. "$WINEPREFIX/"
-fi
-
-if [ ! -f "$WINEPREFIX/system.reg" ]; then
-    echo "ERROR: persistent Wine prefix could not be prepared."
-    exit 89
-fi
-
-echo "Wine prefix: $WINEPREFIX"
 
 echo "Starting Xvfb..."
 Xvfb :0 \
@@ -80,7 +70,6 @@ if ! kill -0 "$OPENBOX_PID" 2>/dev/null; then
     exit 91
 fi
 
-# Use VNC_PASSWORD from Northflank if configured; otherwise generate one.
 if [ -z "${VNC_PASSWORD:-}" ]; then
     VNC_PASSWORD="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 fi
@@ -124,6 +113,41 @@ echo "READY"
 echo "VNC URL: http://YOUR_NORTHFLANK_DOMAIN:6080/vnc.html?autoconnect=true&resize=remote"
 echo "PASSWORD: $VNC_PASSWORD"
 
+# Initialize the Wine prefix only after VNC is already available.
+if [ ! -f "$WINEPREFIX/system.reg" ]; then
+    echo "FIRST RUN: initializing Wine 11 prefix..."
+    mkdir -p "$WINEPREFIX"
+
+    # Disable only Gecko/Mono prompts during prefix creation. Steam itself uses
+    # Chromium/CEF, not Wine Gecko.
+    WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d" \
+        dbus-launch wineboot -u >>/tmp/wineboot.log 2>&1 || {
+            echo "ERROR: wineboot failed"
+            tail -150 /tmp/wineboot.log || true
+            exit 94
+        }
+
+    wineserver -w || true
+fi
+
+if [ ! -f "$WINEPREFIX/system.reg" ]; then
+    echo "ERROR: Wine prefix was not created."
+    exit 95
+fi
+
+echo "Wine prefix: OK"
+
+# Prove on the actual Northflank runtime that 32-bit Windows execution works.
+if ! WINEDLLOVERRIDES="winemenubuilder.exe=d" \
+     wine 'C:\windows\syswow64\cmd.exe' /c exit \
+     >/tmp/wow64-runtime-test.log 2>&1; then
+    echo "ERROR: Wine new-WoW64 could not execute a 32-bit Windows component."
+    tail -120 /tmp/wow64-runtime-test.log || true
+    exit 96
+fi
+
+echo "Wine WoW64: OK"
+
 find_steam() {
     for p in \
         "$WINEPREFIX/drive_c/Program Files (x86)/Steam/steam.exe" \
@@ -136,13 +160,11 @@ find_steam() {
         fi
     done
 
-    found="$(find "$WINEPREFIX/drive_c" -maxdepth 5 -type f -iname steam.exe -print -quit 2>/dev/null || true)"
-    if [ -n "$found" ]; then
-        printf '%s\n' "$found"
-        return 0
-    fi
-
-    return 1
+    find "$WINEPREFIX/drive_c" \
+        -maxdepth 6 \
+        -type f \
+        -iname steam.exe \
+        -print -quit 2>/dev/null || true
 }
 
 steam_running() {
@@ -153,68 +175,67 @@ installer_running() {
     pgrep -u "$(id -u)" -f 'SteamSetup\.exe' >/dev/null 2>&1
 }
 
-start_steam() {
-    STEAM_EXE="$(find_steam || true)"
-    if [ -z "$STEAM_EXE" ]; then
-        return 1
-    fi
-
-    echo "Steam executable: $STEAM_EXE"
-    echo "Starting Steam visible..."
-
-    dbus-launch wine "$STEAM_EXE" \
-        -no-cef-sandbox \
-        -cef-disable-gpu \
-        -cef-disable-gpu-compositing \
-        >>/tmp/steam-wine.log 2>&1 &
-
-    echo "Steam/Wine launcher PID: $!"
-    return 0
-}
-
 start_installer() {
-    echo "FIRST RUN: Steam is not installed yet."
-    echo "Opening the official Steam installer in VNC."
-    echo "Complete the installer visually. After it finishes, Steam will start automatically."
+    echo "FIRST RUN: Steam is not installed."
+    echo "Opening SteamSetup.exe visibly in VNC..."
+    echo "Complete the Steam installer in the browser VNC window."
 
-    dbus-launch wine /opt/steam-bootstrap/SteamSetup.exe \
+    WINEDLLOVERRIDES="winemenubuilder.exe=d" \
+        dbus-launch wine /opt/steam-bootstrap/SteamSetup.exe \
         >>/tmp/steam-installer.log 2>&1 &
 
     echo "Steam installer PID: $!"
 }
 
-# Existing persistent installation: start it immediately.
-if STEAM_EXE="$(find_steam || true)" && [ -n "$STEAM_EXE" ]; then
+start_steam() {
+    STEAM_EXE="$(find_steam)"
+    if [ -z "$STEAM_EXE" ] || [ ! -s "$STEAM_EXE" ]; then
+        return 1
+    fi
+
+    echo "Steam executable: $STEAM_EXE"
+    echo "Starting Windows Steam visible..."
+
+    WINEDLLOVERRIDES="winemenubuilder.exe=d" \
+        dbus-launch wine "$STEAM_EXE" \
+        -no-cef-sandbox \
+        -cef-disable-gpu \
+        -cef-disable-gpu-compositing \
+        >>/tmp/steam.log 2>&1 &
+
+    echo "Steam launcher PID: $!"
+    return 0
+}
+
+STEAM_EXE="$(find_steam)"
+if [ -n "$STEAM_EXE" ] && [ -s "$STEAM_EXE" ]; then
     start_steam
 else
-    # First boot only. This is intentionally interactive because unattended
-    # SteamSetup under Wine proved fragile. The installer binary itself was
-    # already downloaded during Docker build.
     start_installer
 fi
 
-# State machine:
-# - while installer is visible, user completes it through VNC
-# - once steam.exe appears and installer exits, Steam is launched
-# - after that Steam is restarted if it genuinely crashes
+# Installer/Steam state machine. Never kill the container just because the
+# installer was closed: keep VNC alive and surface diagnostics.
+INSTALL_RETRY_AT=0
+
 while kill -0 "$XVFB_PID" 2>/dev/null; do
     sleep 5
 
     if ! kill -0 "$VNC_PID" 2>/dev/null; then
         echo "ERROR: x11vnc exited"
         tail -100 /tmp/x11vnc.log || true
-        exit 94
+        exit 97
     fi
 
     if ! kill -0 "$NOVNC_PID" 2>/dev/null; then
         echo "ERROR: noVNC exited"
         tail -100 /tmp/novnc.log || true
-        exit 95
+        exit 98
     fi
 
-    STEAM_EXE="$(find_steam || true)"
+    STEAM_EXE="$(find_steam)"
 
-    if [ -n "$STEAM_EXE" ]; then
+    if [ -n "$STEAM_EXE" ] && [ -s "$STEAM_EXE" ]; then
         if ! installer_running && ! steam_running; then
             echo "Steam installation detected."
             start_steam || true
@@ -222,15 +243,19 @@ while kill -0 "$XVFB_PID" 2>/dev/null; do
         fi
     else
         if ! installer_running; then
-            echo "Steam is still not installed. Reopening installer in VNC..."
-            echo "----- installer log -----"
-            tail -80 /tmp/steam-installer.log 2>/dev/null || true
-            start_installer
-            sleep 10
+            NOW="$(date +%s)"
+            if [ "$NOW" -ge "$INSTALL_RETRY_AT" ]; then
+                echo "Steam is not installed yet."
+                echo "Last installer log:"
+                tail -80 /tmp/steam-installer.log 2>/dev/null || true
+                echo "Reopening installer..."
+                start_installer
+                INSTALL_RETRY_AT=$((NOW + 30))
+            fi
         fi
     fi
 done
 
 echo "ERROR: Xvfb exited"
 cat /tmp/xvfb.log || true
-exit 96
+exit 99
