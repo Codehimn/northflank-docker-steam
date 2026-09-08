@@ -1,10 +1,10 @@
-# TaskbarHero on Northflank - V15
-# Native Steam Linux is intentionally NOT used because the observed Northflank
+# TaskbarHero on Northflank - V16 FINAL
+# Native Steam Linux is intentionally not used because the observed Northflank
 # x86_64 runtime rejects Linux i386 ELF execution. This image uses Windows Steam
-# through Wine 11 new-WoW64 and remains non-root at runtime.
+# with Wine 11 new-WoW64 and keeps runtime non-root.
 FROM --platform=linux/amd64 ubuntu:26.04
 
-LABEL taskbarhero.version="v15-20260908"
+LABEL taskbarhero.version="v16-final-20260908"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/steamuser \
@@ -16,10 +16,12 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         wget \
+        curl \
         gnupg \
         file \
         procps \
         psmisc \
+        iproute2 \
         tini \
         xauth \
         x11-utils \
@@ -47,7 +49,7 @@ RUN apt-get update && \
         libfontconfig1 && \
     rm -rf /var/lib/apt/lists/*
 
-# Official WineHQ stable repository for Ubuntu 26.04.
+# WineHQ stable for Ubuntu 26.04.
 RUN install -d -m 0755 /etc/apt/keyrings && \
     wget -qO- https://dl.winehq.org/wine-builds/winehq.key \
         | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.gpg && \
@@ -60,22 +62,22 @@ RUN install -d -m 0755 /etc/apt/keyrings && \
     apt-get install -y --install-recommends winehq-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Xvfb needs this to exist before runtime drops root.
+# Prepare X socket directory before dropping root.
 RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
-# Do not force UID 1000; previous Northflank builds showed it may already exist.
+# Do not force UID 1000; previous Northflank builds showed it can be occupied.
 RUN useradd --create-home --shell /bin/bash steamuser && \
     mkdir -p /data /opt/steam-bootstrap && \
     chown -R steamuser:steamuser /data /opt/steam-bootstrap /home/steamuser
 
-# Bake the official Windows Steam installer into the image during build.
+# Official Windows Steam installer baked into the image.
 RUN wget -qO /opt/steam-bootstrap/SteamSetup.exe \
         https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe && \
     test -s /opt/steam-bootstrap/SteamSetup.exe && \
     file /opt/steam-bootstrap/SteamSetup.exe | grep -qi 'PE32' && \
     chown steamuser:steamuser /opt/steam-bootstrap/SteamSetup.exe
 
-# Fail build early if any command/path required by start.sh is absent.
+# Build-time dependency verification.
 RUN command -v wine >/dev/null && \
     command -v wineserver >/dev/null && \
     command -v Xvfb >/dev/null && \
@@ -83,7 +85,8 @@ RUN command -v wine >/dev/null && \
     command -v openbox-session >/dev/null && \
     command -v x11vnc >/dev/null && \
     command -v websockify >/dev/null && \
-    command -v dbus-launch >/dev/null && \
+    command -v curl >/dev/null && \
+    command -v ss >/dev/null && \
     test -f /usr/share/novnc/vnc.html && \
     wine --version
 
@@ -95,5 +98,6 @@ WORKDIR /home/steamuser
 
 EXPOSE 6080
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+# Northflank wraps the container entrypoint, so register tini as subreaper.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["/usr/local/bin/start.sh"]
