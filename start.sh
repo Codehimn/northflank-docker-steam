@@ -4,70 +4,59 @@ set -eu
 export HOME=/home/steamuser
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/tmp/runtime-steamuser
+export WINEPREFIX=/data/wineprefix
+export WINEARCH=wow64
 
-# Northflank free tier: no GPU and no audio required.
+# No GPU/audio on the target service.
 export LIBGL_ALWAYS_SOFTWARE=1
 export SDL_AUDIODRIVER=dummy
 
+# Avoid Wine Gecko/Mono prompts and unnecessary Start-menu integration.
+export WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d"
+export WINEDEBUG=-all
+
 echo "Runtime architecture: $(uname -m)"
 echo "Runtime user: $(id)"
+echo "Wine: $(wine --version)"
 
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *)
-        echo "ERROR: Steam requires an x86/x86_64 Northflank deployment."
-        echo "Select x86 architecture for the service."
+        echo "ERROR: this image requires an x86_64 Northflank node."
         exit 86
         ;;
 esac
-
-# Test i386 execution only on the FINAL runtime.
-if ! /lib/ld-linux.so.2 --help >/dev/null 2>&1; then
-    echo "ERROR: this runtime cannot execute 32-bit i386 binaries."
-    echo "Steam Linux requires IA32 compatibility on the x86_64 node."
-    exit 87
-fi
-
-echo "32-bit runtime: OK"
 
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
 if [ ! -w /data ]; then
     echo "ERROR: /data is not writable by steamuser."
-    echo "steamuser UID=$(id -u) GID=$(id -g)"
-    echo "The Northflank persistent volume must permit this non-root user to write."
+    echo "UID=$(id -u) GID=$(id -g)"
     exit 88
 fi
 
-mkdir -p /data/Steam /data/.steam "$HOME/.local/share"
-
-# Remove only stale Steam bootstrap/runtime files from previous image revisions.
-# Preserve config, userdata, login state, steamapps and Proton prefixes.
-IMAGE_REVISION="v9"
-if [ ! -f "/data/.taskbarhero-image-${IMAGE_REVISION}" ]; then
-    echo "Refreshing Steam bootstrap from previous container revisions..."
-    rm -rf \
-        /data/Steam/ubuntu12_32 \
-        /data/Steam/ubuntu12_64 \
-        /data/Steam/package \
-        /data/Steam/steam-runtime \
-        /data/Steam/steam-runtime-heavy \
-        2>/dev/null || true
-    touch "/data/.taskbarhero-image-${IMAGE_REVISION}"
+# No installer is run at container startup.
+# On the first boot we only copy the prefix already prepared during Docker build.
+if [ ! -f "$WINEPREFIX/system.reg" ]; then
+    echo "Creating persistent Wine prefix from build-time template..."
+    mkdir -p "$WINEPREFIX"
+    cp -a /opt/wineprefix-template/. "$WINEPREFIX/"
 fi
 
-rm -rf "$HOME/.local/share/Steam" "$HOME/.steam"
-ln -s /data/Steam "$HOME/.local/share/Steam"
-ln -s /data/.steam "$HOME/.steam"
+STEAM_EXE="$WINEPREFIX/drive_c/Program Files (x86)/Steam/steam.exe"
+if [ ! -f "$STEAM_EXE" ]; then
+    # Future Steam installers might choose Program Files instead.
+    STEAM_EXE="$WINEPREFIX/drive_c/Program Files/Steam/steam.exe"
+fi
 
-STEAM_BIN=/usr/games/steam
-if [ ! -x "$STEAM_BIN" ]; then
-    echo "ERROR: Steam launcher missing at $STEAM_BIN"
+if [ ! -f "$STEAM_EXE" ]; then
+    echo "ERROR: Windows Steam executable was not found in the prepared prefix."
+    find "$WINEPREFIX/drive_c" -maxdepth 5 -iname 'steam.exe' -print || true
     exit 89
 fi
 
-echo "Steam binary: $STEAM_BIN"
+echo "Steam executable: $STEAM_EXE"
 
 echo "Starting Xvfb..."
 Xvfb :0 \
@@ -97,7 +86,6 @@ if ! kill -0 "$OPENBOX_PID" 2>/dev/null; then
     exit 91
 fi
 
-# Use a Northflank VNC_PASSWORD env var if provided; otherwise generate one.
 if [ -z "${VNC_PASSWORD:-}" ]; then
     VNC_PASSWORD="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 fi
@@ -142,27 +130,25 @@ echo "VNC URL: http://YOUR_NORTHFLANK_DOMAIN:6080/vnc.html?autoconnect=true"
 echo "PASSWORD: $VNC_PASSWORD"
 
 start_steam() {
-    echo "Starting Steam visible..."
-    dbus-launch \
-        "$STEAM_BIN" \
+    echo "Starting Windows Steam through Wine 11 WoW64..."
+    dbus-launch wine "$STEAM_EXE" \
         -no-cef-sandbox \
-        -cef-disable-gpu \
-        -cef-disable-gpu-compositing \
-        >>/tmp/steam.log 2>&1 &
-    echo "Steam launcher PID: $!"
+        -nochatui \
+        -nofriendsui \
+        >>/tmp/steam-wine.log 2>&1 &
+    echo "Steam/Wine launcher PID: $!"
 }
 
 start_steam
 
-# First Steam launch can download/update its client, so allow it time.
-sleep 30
-if ! pgrep -u "$(id -u)" -f 'steam|steamwebhelper' >/dev/null 2>&1; then
-    echo "WARNING: no Steam process detected after startup."
-    echo "----- /tmp/steam.log -----"
-    tail -180 /tmp/steam.log || true
+# Steam may self-update and replace/restart its own processes.
+sleep 35
+if ! pgrep -u "$(id -u)" -f 'steam.exe|steamwebhelper|wineserver' >/dev/null 2>&1; then
+    echo "WARNING: no Steam/Wine process detected after startup."
+    echo "----- /tmp/steam-wine.log -----"
+    tail -180 /tmp/steam-wine.log || true
 fi
 
-# Keep graphical services alive and recover Steam if it fully exits.
 while kill -0 "$XVFB_PID" 2>/dev/null; do
     sleep 60
 
@@ -178,9 +164,9 @@ while kill -0 "$XVFB_PID" 2>/dev/null; do
         exit 95
     fi
 
-    if ! pgrep -u "$(id -u)" -f 'steam|steamwebhelper' >/dev/null 2>&1; then
-        echo "Steam stopped. Last log:"
-        tail -120 /tmp/steam.log || true
+    if ! pgrep -u "$(id -u)" -f 'steam.exe|steamwebhelper|wineserver' >/dev/null 2>&1; then
+        echo "Steam/Wine stopped. Last log:"
+        tail -120 /tmp/steam-wine.log || true
         echo "Restarting Steam..."
         start_steam
     fi
