@@ -1,6 +1,6 @@
-# Native Steam for Linux cannot run on Northflank nodes that reject i386 ELF.
-# Wine 11 new-WoW64 runs 32-bit Windows components inside a 64-bit Unix process,
-# so it does not require Linux IA32 execution support.
+# TaskbarHero / Northflank
+# Native Steam Linux cannot run on the observed Northflank node because Linux
+# i386 ELF execution is blocked. Wine 11 new-WoW64 avoids that requirement.
 FROM --platform=linux/amd64 ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -9,12 +9,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-# Minimal X11/noVNC stack + software OpenGL dependencies.
+# Minimal graphical/VNC stack and 64-bit Unix libraries for Wine.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         wget \
         gnupg \
+        file \
         xauth \
         dbus-x11 \
         procps \
@@ -41,8 +42,9 @@ RUN apt-get update && \
         libfontconfig1 && \
     rm -rf /var/lib/apt/lists/*
 
-# WineHQ stable on Ubuntu 26.04 uses the completed "new WoW64" architecture.
-# No Linux i386 architecture is enabled or installed.
+# WineHQ stable for Ubuntu 26.04.
+# Wine 11 completed the new WoW64 architecture, so no Linux i386 multiarch is
+# enabled in this image.
 RUN install -d -m 0755 /etc/apt/keyrings && \
     wget -qO- https://dl.winehq.org/wine-builds/winehq.key \
         | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.gpg && \
@@ -63,27 +65,34 @@ RUN useradd --create-home --shell /bin/bash steamuser && \
     chown -R steamuser:steamuser \
         /data /opt/steam-bootstrap /opt/wineprefix-template /home/steamuser
 
-# Download the official Windows Steam installer at build time.
+# Download SteamSetup.exe at BUILD time. Nothing is downloaded by our startup
+# script before the Steam client itself starts.
 RUN wget -qO /opt/steam-bootstrap/SteamSetup.exe \
         https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe && \
     test -s /opt/steam-bootstrap/SteamSetup.exe && \
+    file /opt/steam-bootstrap/SteamSetup.exe | grep -qi 'PE32' && \
     chown steamuser:steamuser /opt/steam-bootstrap/SteamSetup.exe
 
-# Build a ready-to-use 64-bit Wine prefix and install Steam silently.
-# Wine 11's new WoW64 can run Steam's 32-bit Windows bootstrap without Linux i386.
 USER steamuser
+
+# Prepare the Wine prefix at build time, but deliberately DO NOT install Steam
+# silently here. That was the fragile part of v10/v11. We also prove during the
+# build that Wine can execute a 32-bit Windows program through new WoW64.
 RUN export WINEPREFIX=/opt/wineprefix-template && \
-    export WINEARCH=wow64 && \
-    export WINEDLLOVERRIDES="mscoree,mshtml=" && \
+    export WINEARCH=win64 && \
+    export WINEDEBUG=-all && \
     xvfb-run -a wineboot -u >/tmp/wineboot-build.log 2>&1 && \
-    xvfb-run -a wine /opt/steam-bootstrap/SteamSetup.exe /S \
-        >/tmp/steam-install-build.log 2>&1 && \
-    wineserver -k || true
+    wineserver -w && \
+    export WINEARCH=wow64 && \
+    xvfb-run -a wine 'C:\windows\syswow64\cmd.exe' /c exit \
+        >/tmp/wow64-test.log 2>&1 && \
+    wineserver -k && \
+    test -f /opt/wineprefix-template/system.reg
 
 USER root
 COPY start.sh /usr/local/bin/start.sh
 RUN chmod 0755 /usr/local/bin/start.sh && \
-    chown -R steamuser:steamuser /opt/wineprefix-template
+    chown -R steamuser:steamuser /opt/wineprefix-template /opt/steam-bootstrap
 
 USER steamuser
 WORKDIR /home/steamuser
