@@ -1,19 +1,23 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-VERSION="V14-DEFENSIVE"
+VERSION="V15"
 export HOME=/home/steamuser
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/tmp/runtime-steamuser
-export WINEPREFIX=/data/taskbarhero-v14
 
-# Northflank target has no GPU/audio. Steam's own UI is forced to software mode.
+# New prefix so no stale Wine state from v10-v14 can interfere.
+export WINEPREFIX=/data/taskbarhero-v15
+
+# IMPORTANT:
+# Do NOT force WINEARCH=wow64.
+# Wine 11 new-WoW64 selects the proper Windows architecture itself.
+unset WINEARCH || true
+
+# Northflank target has no GPU/audio.
 export LIBGL_ALWAYS_SOFTWARE=1
 export SDL_AUDIODRIVER=dummy
-
-# Wine 11: create a normal 64-bit prefix first, then force new-WoW64 when
-# executing 32-bit Windows components.
-unset WINEARCH || true
+export WINEDEBUG=-all
 
 XVFB_PID=""
 OPENBOX_PID=""
@@ -21,8 +25,61 @@ VNC_PID=""
 NOVNC_PID=""
 DBUS_SESSION_BUS_PID="${DBUS_SESSION_BUS_PID:-}"
 
+ts() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
+
 log() {
-    printf '%s\n' "$*"
+    printf '[%s] %s\n' "$(ts)" "$*"
+}
+
+diagnostics() {
+    log "===== DIAGNOSTICS BEGIN ====="
+    log "Architecture: $(uname -m)"
+    log "User: $(id)"
+    log "Wine: $(wine --version 2>/dev/null || true)"
+    log "DISPLAY=$DISPLAY"
+    log "WINEPREFIX=$WINEPREFIX"
+
+    log "--- memory ---"
+    grep -E 'MemTotal|MemFree|MemAvailable|SwapTotal|SwapFree' /proc/meminfo || true
+
+    log "--- filesystem ---"
+    df -h /data /dev/shm 2>/dev/null || true
+
+    log "--- processes ---"
+    ps -eo pid,ppid,user,%mem,rss,stat,comm,args --sort=-rss | head -40 || true
+
+    log "--- Steam candidates ---"
+    find "$WINEPREFIX/drive_c" -maxdepth 6 -type f \
+        \( -iname 'steam.exe' -o -iname 'steamwebhelper.exe' -o -iname 'SteamSetup.exe' \) \
+        -print 2>/dev/null || true
+
+    log "--- Wine prefix top-level ---"
+    ls -la "$WINEPREFIX" 2>/dev/null || true
+
+    log "--- /tmp/wineboot.log ---"
+    tail -80 /tmp/wineboot.log 2>/dev/null || true
+
+    log "--- /tmp/steam-installer.log ---"
+    tail -120 /tmp/steam-installer.log 2>/dev/null || true
+
+    log "--- /tmp/steam.log ---"
+    tail -120 /tmp/steam.log 2>/dev/null || true
+
+    log "--- /tmp/xvfb.log ---"
+    tail -50 /tmp/xvfb.log 2>/dev/null || true
+
+    log "--- /tmp/openbox.log ---"
+    tail -50 /tmp/openbox.log 2>/dev/null || true
+
+    log "--- /tmp/x11vnc.log ---"
+    tail -50 /tmp/x11vnc.log 2>/dev/null || true
+
+    log "--- /tmp/novnc.log ---"
+    tail -50 /tmp/novnc.log 2>/dev/null || true
+
+    log "===== DIAGNOSTICS END ====="
 }
 
 cleanup() {
@@ -38,21 +95,18 @@ cleanup() {
 trap cleanup TERM INT EXIT
 
 hold_for_debug() {
-    log "Container will stay alive so VNC/logs remain available for diagnosis."
+    diagnostics
+    log "Container will stay alive for VNC/log inspection."
     while true; do sleep 3600; done
 }
 
-log "=========================================="
-log "=== TASKBARHERO NORTHFLANK ${VERSION} ==="
-log "=========================================="
+log "===================================="
+log "=== TASKBARHERO NORTHFLANK V15 ==="
+log "===================================="
 log "Runtime architecture: $(uname -m)"
 log "Runtime user: $(id)"
 log "Wine: $(wine --version)"
-log "Prefix: $WINEPREFIX"
-log "Memory:"
-grep -E 'MemTotal|MemAvailable' /proc/meminfo || true
-log "/dev/shm:"
-df -h /dev/shm 2>/dev/null || true
+log "Persistent prefix: $WINEPREFIX"
 
 case "$(uname -m)" in
     x86_64|amd64) ;;
@@ -65,20 +119,17 @@ esac
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
-# A mounted volume can hide the ownership set during Docker build, so verify the
-# real runtime mount rather than assuming it is writable.
+# A mounted /data volume can hide Dockerfile ownership, so test the real mount.
 if ! mkdir -p "$WINEPREFIX" 2>/tmp/data-error.log; then
     log "FATAL: /data is not writable by steamuser."
-    log "UID=$(id -u) GID=$(id -g)"
     cat /tmp/data-error.log || true
     hold_for_debug
 fi
 
-# One shared D-Bus session for Openbox and Wine. This avoids accumulating
-# dbus-launch processes after Steam self-updates/restarts.
+# One shared D-Bus session for all Wine/Steam processes.
 eval "$(dbus-launch --sh-syntax)"
 export DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID
-log "D-Bus session: OK"
+log "D-Bus: OK"
 
 log "Starting Xvfb..."
 Xvfb :0 \
@@ -90,9 +141,9 @@ Xvfb :0 \
     >/tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
 
-# Avoid fixed sleeps/races. Wait until X really accepts connections.
+# Wait for X to actually become ready.
 X_READY=0
-for _ in $(seq 1 50); do
+for _ in $(seq 1 60); do
     if xdpyinfo -display :0 >/dev/null 2>&1; then
         X_READY=1
         break
@@ -100,12 +151,11 @@ for _ in $(seq 1 50); do
     if ! kill -0 "$XVFB_PID" 2>/dev/null; then
         break
     fi
-    sleep 0.2
+    sleep 0.25
 done
 
 if [ "$X_READY" -ne 1 ]; then
     log "FATAL: Xvfb did not become ready."
-    cat /tmp/xvfb.log || true
     hold_for_debug
 fi
 log "Xvfb: OK"
@@ -117,12 +167,11 @@ OPENBOX_PID=$!
 sleep 0.5
 if ! kill -0 "$OPENBOX_PID" 2>/dev/null; then
     log "FATAL: Openbox failed."
-    cat /tmp/openbox.log || true
     hold_for_debug
 fi
 log "Openbox: OK"
 
-# VNC passwords are effectively 8 chars in classic VNC auth. Generate exactly 8.
+# Classic VNC auth effectively uses 8 chars.
 if [ -z "${VNC_PASSWORD:-}" ]; then
     VNC_PASSWORD="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 else
@@ -158,7 +207,6 @@ start_vnc
 sleep 0.5
 if ! kill -0 "$VNC_PID" 2>/dev/null; then
     log "FATAL: x11vnc failed."
-    cat /tmp/x11vnc.log || true
     hold_for_debug
 fi
 log "VNC: OK"
@@ -168,7 +216,6 @@ start_novnc
 sleep 0.5
 if ! kill -0 "$NOVNC_PID" 2>/dev/null; then
     log "FATAL: noVNC/websockify failed."
-    cat /tmp/novnc.log || true
     hold_for_debug
 fi
 log "noVNC: OK"
@@ -178,18 +225,16 @@ log "READY"
 log "VNC URL: ${PUBLIC_URL%/}/vnc.html?autoconnect=true&resize=remote"
 log "PASSWORD: $VNC_PASSWORD"
 
-# Initialize Wine only after VNC is working, so any unexpected Wine dialog can
-# actually be seen instead of leaving an apparently black session.
+# Initialize Wine only after VNC is already working.
 if [ ! -f "$WINEPREFIX/system.reg" ]; then
-    log "FIRST RUN: creating clean Wine 64-bit prefix..."
+    log "FIRST RUN: creating clean Wine prefix..."
     rm -rf "$WINEPREFIX"
     mkdir -p "$WINEPREFIX"
 
-    if ! env -u WINEARCH \
-        WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d" \
+    # Suppress Gecko/Mono prompts only during wineboot. Steam itself uses CEF.
+    if ! WINEDLLOVERRIDES="mscoree,mshtml=;winemenubuilder.exe=d" \
         wineboot -u >>/tmp/wineboot.log 2>&1; then
         log "FATAL: wineboot failed."
-        tail -200 /tmp/wineboot.log || true
         hold_for_debug
     fi
 
@@ -202,17 +247,8 @@ if [ ! -f "$WINEPREFIX/system.reg" ]; then
 fi
 log "Wine prefix: OK"
 
-# This is the decisive test for the Northflank limitation we hit with native
-# Steam Linux. It tests a 32-bit WINDOWS program, not a Linux i386 ELF.
-export WINEARCH=wow64
-if ! WINEDLLOVERRIDES="winemenubuilder.exe=d" \
-    wine 'C:\windows\syswow64\cmd.exe' /c ver \
-    >/tmp/wow64-test.log 2>&1; then
-    log "FATAL: Wine 11 new-WoW64 could not run a 32-bit Windows component."
-    tail -200 /tmp/wow64-test.log || true
-    hold_for_debug
-fi
-log "Wine WoW64: OK"
+# V15 deliberately removes the fake syswow64\cmd.exe test from V14.
+# SteamSetup.exe itself is the real-world WoW64 test.
 
 find_steam() {
     local p found
@@ -227,11 +263,14 @@ find_steam() {
         fi
     done
 
-    found="$(find "$WINEPREFIX/drive_c" -maxdepth 6 -type f -iname steam.exe -print -quit 2>/dev/null || true)"
+    found="$(find "$WINEPREFIX/drive_c" -maxdepth 6 -type f \
+        -iname steam.exe -print -quit 2>/dev/null || true)"
+
     if [ -n "$found" ] && [ -s "$found" ]; then
         printf '%s\n' "$found"
         return 0
     fi
+
     return 1
 }
 
@@ -245,14 +284,28 @@ installer_running() {
 
 start_installer() {
     log "FIRST RUN: Steam is not installed yet."
-    log "Opening official SteamSetup.exe visibly in VNC."
-    log "Complete the installer normally. Keep 'Run Steam' enabled if offered."
+    log "Launching the REAL WoW64 test: official SteamSetup.exe"
+    log "The Steam installer should now appear visibly in VNC."
+    log "Complete it normally and leave 'Run Steam' enabled if offered."
+
+    : > /tmp/steam-installer.log
 
     WINEDLLOVERRIDES="winemenubuilder.exe=d" \
         wine /opt/steam-bootstrap/SteamSetup.exe \
         >>/tmp/steam-installer.log 2>&1 &
 
-    log "Steam installer PID: $!"
+    local pid=$!
+    log "Steam installer PID: $pid"
+
+    # Give it a few seconds. If it dies immediately, expose useful evidence.
+    sleep 5
+    if ! kill -0 "$pid" 2>/dev/null && ! installer_running; then
+        log "WARNING: SteamSetup exited very quickly."
+        log "This is the next diagnostic point if no installer appeared in VNC."
+        diagnostics
+    else
+        log "SteamSetup process: RUNNING"
+    fi
 }
 
 start_steam() {
@@ -266,7 +319,7 @@ start_steam() {
     log "Steam executable: $steam_exe"
 
     if [ "${FARM_MODE:-0}" = "1" ]; then
-        log "Starting Steam in low-RAM farm mode + TaskbarHero AppID 3678970..."
+        log "Starting Steam farm mode + TaskbarHero AppID 3678970..."
         WINEDLLOVERRIDES="winemenubuilder.exe=d" \
             wine "$steam_exe" \
             -silent \
@@ -280,8 +333,6 @@ start_steam() {
             >>/tmp/steam.log 2>&1 &
     else
         log "Starting Steam visible for login/setup..."
-        # These flags target the common CEF/container failure modes: no usable
-        # sandbox and GPU compositing on a GPU-less node.
         WINEDLLOVERRIDES="winemenubuilder.exe=d" \
             wine "$steam_exe" \
             -nochatui \
@@ -295,6 +346,7 @@ start_steam() {
     fi
 
     log "Steam launcher PID: $!"
+    return 0
 }
 
 STEAM_EXE="$(find_steam || true)"
@@ -306,22 +358,22 @@ fi
 
 INSTALL_RETRY_AT=0
 STEAM_RETRY_AT=0
+LAST_HEALTH_LOG=0
 
-# Long-running supervisor. It does not exit merely because SteamSetup or Steam
-# self-updates/restarts; this prevents Northflank restart loops.
 while true; do
     sleep 5
+    NOW="$(date +%s)"
 
-    # Recover VNC/noVNC if either side dies.
+    # Recover VNC/noVNC if either dies.
     if ! kill -0 "$VNC_PID" 2>/dev/null; then
-        log "x11vnc stopped. Restarting it..."
+        log "x11vnc stopped. Restarting..."
         tail -80 /tmp/x11vnc.log || true
         start_vnc
         sleep 1
     fi
 
     if ! kill -0 "$NOVNC_PID" 2>/dev/null; then
-        log "noVNC stopped. Restarting it..."
+        log "noVNC stopped. Restarting..."
         tail -80 /tmp/novnc.log || true
         start_novnc
         sleep 1
@@ -329,15 +381,12 @@ while true; do
 
     if ! kill -0 "$XVFB_PID" 2>/dev/null; then
         log "FATAL: Xvfb exited."
-        tail -120 /tmp/xvfb.log || true
         hold_for_debug
     fi
 
-    NOW="$(date +%s)"
     STEAM_EXE="$(find_steam || true)"
 
     if [ -n "$STEAM_EXE" ]; then
-        # Do not interfere while the installer is still finishing.
         if ! installer_running && ! steam_running && [ "$NOW" -ge "$STEAM_RETRY_AT" ]; then
             log "Steam is installed but not running. Starting/restarting..."
             tail -100 /tmp/steam.log 2>/dev/null || true
@@ -347,10 +396,18 @@ while true; do
     else
         if ! installer_running && [ "$NOW" -ge "$INSTALL_RETRY_AT" ]; then
             log "SteamSetup is not running and steam.exe is still absent."
-            tail -100 /tmp/steam-installer.log 2>/dev/null || true
-            log "Reopening installer in VNC..."
+            tail -120 /tmp/steam-installer.log 2>/dev/null || true
+            log "Reopening SteamSetup in VNC..."
             start_installer
             INSTALL_RETRY_AT=$((NOW + 45))
         fi
+    fi
+
+    # Lightweight health log every 5 minutes, useful for spotting OOM pressure.
+    if [ "$NOW" -ge "$LAST_HEALTH_LOG" ]; then
+        MEM_AVAIL="$(awk '/MemAvailable:/ {print $2 " kB"}' /proc/meminfo 2>/dev/null || true)"
+        RSS_TOP="$(ps -eo rss,comm --sort=-rss 2>/dev/null | head -6 | tr '\n' ';' || true)"
+        log "HEALTH MemAvailable=${MEM_AVAIL:-unknown}; topRSS=${RSS_TOP:-unknown}"
+        LAST_HEALTH_LOG=$((NOW + 300))
     fi
 done

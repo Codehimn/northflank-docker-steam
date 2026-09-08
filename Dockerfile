@@ -1,10 +1,10 @@
-# TaskbarHero on Northflank - V14 defensive build
-# Native Steam Linux was ruled out because the observed Northflank x86_64 node
-# rejects Linux i386 ELF execution. This image therefore uses Windows Steam
+# TaskbarHero on Northflank - V15
+# Native Steam Linux is intentionally NOT used because the observed Northflank
+# x86_64 runtime rejects Linux i386 ELF execution. This image uses Windows Steam
 # through Wine 11 new-WoW64 and remains non-root at runtime.
 FROM --platform=linux/amd64 ubuntu:26.04
 
-LABEL taskbarhero.version="v14-defensive-20260908"
+LABEL taskbarhero.version="v15-20260908"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/steamuser \
@@ -47,9 +47,7 @@ RUN apt-get update && \
         libfontconfig1 && \
     rm -rf /var/lib/apt/lists/*
 
-# Official WineHQ stable repository for Ubuntu 26.04 (Resolute).
-# Wine 11 completed the new WoW64 architecture, allowing 32-bit Windows
-# applications to run without Linux i386 userspace.
+# Official WineHQ stable repository for Ubuntu 26.04.
 RUN install -d -m 0755 /etc/apt/keyrings && \
     wget -qO- https://dl.winehq.org/wine-builds/winehq.key \
         | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.gpg && \
@@ -62,23 +60,22 @@ RUN install -d -m 0755 /etc/apt/keyrings && \
     apt-get install -y --install-recommends winehq-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Xvfb needs this directory to pre-exist because runtime is deliberately non-root.
+# Xvfb needs this to exist before runtime drops root.
 RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
-# Do not force UID 1000: previous images proved that UID can already be occupied.
+# Do not force UID 1000; previous Northflank builds showed it may already exist.
 RUN useradd --create-home --shell /bin/bash steamuser && \
     mkdir -p /data /opt/steam-bootstrap && \
     chown -R steamuser:steamuser /data /opt/steam-bootstrap /home/steamuser
 
-# Bake the official Steam Windows installer into the image. No package installs
-# or SteamSetup downloads are performed by our startup script.
+# Bake the official Windows Steam installer into the image during build.
 RUN wget -qO /opt/steam-bootstrap/SteamSetup.exe \
         https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe && \
     test -s /opt/steam-bootstrap/SteamSetup.exe && \
     file /opt/steam-bootstrap/SteamSetup.exe | grep -qi 'PE32' && \
     chown steamuser:steamuser /opt/steam-bootstrap/SteamSetup.exe
 
-# Fail the Docker build early if any command/path that start.sh relies on is absent.
+# Fail build early if any command/path required by start.sh is absent.
 RUN command -v wine >/dev/null && \
     command -v wineserver >/dev/null && \
     command -v Xvfb >/dev/null && \
