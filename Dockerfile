@@ -1,50 +1,64 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/steamuser \
     DISPLAY=:0
 
-# Steam requires both amd64 and i386 userspace libraries.
+# Use Ubuntu's own Steam packaging instead of mixing Valve's repository with
+# Ubuntu packages. This package pulls the matching 64/32-bit Steam dependency
+# metapackages, which is much less fragile in a minimal container.
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
-        curl \
         dbus-x11 \
-        xterm \
+        file \
+        procps \
+        xdg-user-dirs \
+        xdg-utils \
+        bubblewrap \
         xvfb \
         openbox \
         x11vnc \
         novnc \
         websockify \
+        steam-installer \
+        steam-libs:amd64 \
+        steam-libs:i386 \
+        steam-libs-i386:i386 \
+        libc6:i386 \
+        libc6-i386 \
+        libgcc-s1:i386 \
+        libstdc++6:i386 \
+        libgl1:amd64 \
+        libgl1:i386 \
         libgl1-mesa-dri:amd64 \
         libgl1-mesa-dri:i386 \
-        libgl1-mesa-glx:amd64 \
-        libgl1-mesa-glx:i386 \
+        libegl1:amd64 \
+        libegl1:i386 \
+        libgbm1:amd64 \
+        libgbm1:i386 \
+        libdrm2:amd64 \
+        libdrm2:i386 \
         libvulkan1:amd64 \
         libvulkan1:i386 \
         mesa-vulkan-drivers:amd64 \
         mesa-vulkan-drivers:i386 && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Valve's current official launcher package directly.
-# Important: we DO NOT create steam-stable.list ourselves.
-# The package owns that conffile, avoiding dpkg's interactive conffile prompt.
-RUN curl -fsSL \
-        https://repo.steampowered.com/steam/archive/stable/steam_latest.deb \
-        -o /tmp/steam.deb && \
-    apt-get update && \
-    apt-get install -y \
-        -o Dpkg::Options::="--force-confnew" \
-        /tmp/steam.deb && \
-    rm -f /tmp/steam.deb && \
-    rm -rf /var/lib/apt/lists/* && \
-    test -x /usr/bin/steam
+# Build-time sanity checks. Fail the image build immediately if the exact
+# 32-bit loader/libc that Steam needs are missing or cannot execute.
+RUN test -x /usr/games/steam && \
+    test -e /lib/ld-linux.so.2 && \
+    test -e /lib/i386-linux-gnu/libc.so.6 && \
+    dpkg-query -W -f='${Status}\n' libc6:i386 | grep -q 'install ok installed' && \
+    /lib/ld-linux.so.2 --help >/dev/null
 
-# In a normal desktop steamdeps may invoke apt/pkexec.
-# All system packages are baked into this image and runtime is deliberately
-# non-root. Flathub uses the same pattern: make steamdeps a successful no-op.
-RUN ln -sf /bin/true /usr/bin/steamdeps
+# On a desktop steamdeps may call apt/pkexec. Runtime here is deliberately
+# non-root and every host dependency is baked into the image, so make the
+# helper a successful no-op to prevent interactive privilege dialogs.
+RUN if [ -e /usr/bin/steamdeps ]; then ln -sf /bin/true /usr/bin/steamdeps; fi
 
 # Xvfb cannot create this directory after USER steamuser.
 RUN mkdir -p /tmp/.X11-unix && \
