@@ -1,5 +1,4 @@
 # Steam for Linux is x86_64 and still requires i386 execution.
-# Force an amd64 image even if Northflank's BuildKit worker itself is ARM.
 FROM --platform=linux/amd64 ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -8,8 +7,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-# Ubuntu's Steam metapackages pull the matching host libraries.
-# Explicit core i386 packages are kept here because Steam's bootstrap is 32-bit.
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -18,6 +15,7 @@ RUN dpkg --add-architecture i386 && \
         procps \
         xdg-user-dirs \
         xdg-utils \
+        fonts-dejavu-core \
         xvfb \
         openbox \
         x11vnc \
@@ -48,27 +46,28 @@ RUN dpkg --add-architecture i386 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# IMPORTANT:
-# BuildKit can be running through cross-architecture emulation and may be unable
-# to EXECUTE an i386 ELF even though the final x86 runtime can. Therefore these
-# build checks verify presence/packaging only; they deliberately do not execute
-# /lib/ld-linux.so.2.
+# Build checks verify package/file presence only.
+# Do NOT execute the 32-bit loader here because cross-architecture BuildKit
+# workers can reject i386 ELF even when the final x86_64 runtime supports it.
 RUN test -x /usr/games/steam && \
     test -e /lib/ld-linux.so.2 && \
     test -e /lib/i386-linux-gnu/libc.so.6 && \
     dpkg-query -W -f='${Status}\n' libc6:i386 | grep -q 'install ok installed' && \
     dpkg-query -W -f='${Status}\n' steam-libs-i386:i386 | grep -q 'install ok installed'
 
-# steamdeps is for interactive desktop privilege escalation via apt/pkexec.
-# All system dependencies are baked in at build time and runtime is non-root.
+# Prevent Steam from opening apt/pkexec dependency dialogs at runtime.
+# Every host dependency is installed during build and runtime is non-root.
 RUN if [ -e /usr/bin/steamdeps ]; then ln -sf /bin/true /usr/bin/steamdeps; fi
 
-# Xvfb needs this before we drop root.
+# Xvfb needs this directory before dropping root.
 RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
-RUN useradd --uid 1000 --create-home --shell /bin/bash steamuser && \
+# IMPORTANT: do not force UID 1000.
+# Ubuntu 24.04 images can already reserve UID 1000, which caused v8 to fail.
+RUN useradd --create-home --shell /bin/bash steamuser && \
     mkdir -p /data/Steam /data/.steam /home/steamuser/.local/share && \
-    chown -R steamuser:steamuser /data /home/steamuser
+    chown -R steamuser:steamuser /data /home/steamuser && \
+    id steamuser
 
 COPY start.sh /usr/local/bin/start.sh
 RUN chmod 0755 /usr/local/bin/start.sh

@@ -5,29 +5,26 @@ export HOME=/home/steamuser
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/tmp/runtime-steamuser
 
-# No GPU on the target service. Mesa/CEF must stay on software rendering.
+# Northflank free tier: no GPU and no audio required.
 export LIBGL_ALWAYS_SOFTWARE=1
-export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 export SDL_AUDIODRIVER=dummy
 
 echo "Runtime architecture: $(uname -m)"
+echo "Runtime user: $(id)"
 
-# Native Steam requires an x86_64 runtime.
 case "$(uname -m)" in
     x86_64|amd64) ;;
     *)
         echo "ERROR: Steam requires an x86/x86_64 Northflank deployment."
-        echo "Set the Northflank service infrastructure architecture to x86."
+        echo "Select x86 architecture for the service."
         exit 86
         ;;
 esac
 
-# Steam's actual client bootstrap is still i386. Test this on the FINAL runtime,
-# not during Docker build, because BuildKit can be cross-architecture.
+# Test i386 execution only on the FINAL runtime.
 if ! /lib/ld-linux.so.2 --help >/dev/null 2>&1; then
-    echo "ERROR: this Northflank runtime cannot execute 32-bit i386 binaries."
-    echo "Steam Linux cannot run natively on this node even though libc6:i386 is installed."
-    echo "Use an x86 Northflank deployment/node with IA32 compatibility enabled."
+    echo "ERROR: this runtime cannot execute 32-bit i386 binaries."
+    echo "Steam Linux requires IA32 compatibility on the x86_64 node."
     exit 87
 fi
 
@@ -37,17 +34,19 @@ mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
 if [ ! -w /data ]; then
-    echo "ERROR: /data is not writable by steamuser (UID $(id -u))."
+    echo "ERROR: /data is not writable by steamuser."
+    echo "steamuser UID=$(id -u) GID=$(id -g)"
+    echo "The Northflank persistent volume must permit this non-root user to write."
     exit 88
 fi
 
 mkdir -p /data/Steam /data/.steam "$HOME/.local/share"
 
-# Clean ONLY old Steam client/bootstrap files once when upgrading from previous
-# container revisions. Login/config/userdata and installed games are preserved.
-IMAGE_REVISION="v8"
+# Remove only stale Steam bootstrap/runtime files from previous image revisions.
+# Preserve config, userdata, login state, steamapps and Proton prefixes.
+IMAGE_REVISION="v9"
 if [ ! -f "/data/.taskbarhero-image-${IMAGE_REVISION}" ]; then
-    echo "Refreshing old Steam client bootstrap while preserving login/game data..."
+    echo "Refreshing Steam bootstrap from previous container revisions..."
     rm -rf \
         /data/Steam/ubuntu12_32 \
         /data/Steam/ubuntu12_64 \
@@ -58,7 +57,6 @@ if [ ! -f "/data/.taskbarhero-image-${IMAGE_REVISION}" ]; then
     touch "/data/.taskbarhero-image-${IMAGE_REVISION}"
 fi
 
-# Persistent login/client/game data.
 rm -rf "$HOME/.local/share/Steam" "$HOME/.steam"
 ln -s /data/Steam "$HOME/.local/share/Steam"
 ln -s /data/.steam "$HOME/.steam"
@@ -73,7 +71,7 @@ echo "Steam binary: $STEAM_BIN"
 
 echo "Starting Xvfb..."
 Xvfb :0 \
-    -screen 0 1280x720x24 \
+    -screen 0 1024x640x24 \
     -ac \
     +extension GLX \
     +render \
@@ -90,10 +88,16 @@ fi
 
 echo "Starting Openbox..."
 openbox-session >/tmp/openbox.log 2>&1 &
-sleep 1
+OPENBOX_PID=$!
 
-# Generate a temporary VNC password unless VNC_PASSWORD was supplied by
-# Northflank as an environment variable.
+sleep 1
+if ! kill -0 "$OPENBOX_PID" 2>/dev/null; then
+    echo "ERROR: Openbox failed"
+    cat /tmp/openbox.log || true
+    exit 91
+fi
+
+# Use a Northflank VNC_PASSWORD env var if provided; otherwise generate one.
 if [ -z "${VNC_PASSWORD:-}" ]; then
     VNC_PASSWORD="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
 fi
@@ -116,7 +120,7 @@ sleep 1
 if ! kill -0 "$VNC_PID" 2>/dev/null; then
     echo "ERROR: x11vnc failed"
     cat /tmp/x11vnc.log || true
-    exit 91
+    exit 92
 fi
 
 echo "Starting noVNC..."
@@ -130,7 +134,7 @@ sleep 1
 if ! kill -0 "$NOVNC_PID" 2>/dev/null; then
     echo "ERROR: noVNC/websockify failed"
     cat /tmp/novnc.log || true
-    exit 92
+    exit 93
 fi
 
 echo "READY"
@@ -150,26 +154,33 @@ start_steam() {
 
 start_steam
 
-sleep 25
+# First Steam launch can download/update its client, so allow it time.
+sleep 30
 if ! pgrep -u "$(id -u)" -f 'steam|steamwebhelper' >/dev/null 2>&1; then
-    echo "WARNING: Steam is not running after initial startup."
+    echo "WARNING: no Steam process detected after startup."
     echo "----- /tmp/steam.log -----"
-    tail -160 /tmp/steam.log || true
+    tail -180 /tmp/steam.log || true
 fi
 
-# Keep X/VNC alive and restart Steam if the client fully exits.
+# Keep graphical services alive and recover Steam if it fully exits.
 while kill -0 "$XVFB_PID" 2>/dev/null; do
     sleep 60
 
+    if ! kill -0 "$VNC_PID" 2>/dev/null; then
+        echo "ERROR: x11vnc exited"
+        tail -100 /tmp/x11vnc.log || true
+        exit 94
+    fi
+
     if ! kill -0 "$NOVNC_PID" 2>/dev/null; then
         echo "ERROR: noVNC exited"
-        tail -80 /tmp/novnc.log || true
-        exit 93
+        tail -100 /tmp/novnc.log || true
+        exit 95
     fi
 
     if ! pgrep -u "$(id -u)" -f 'steam|steamwebhelper' >/dev/null 2>&1; then
         echo "Steam stopped. Last log:"
-        tail -100 /tmp/steam.log || true
+        tail -120 /tmp/steam.log || true
         echo "Restarting Steam..."
         start_steam
     fi
@@ -177,4 +188,4 @@ done
 
 echo "ERROR: Xvfb exited"
 cat /tmp/xvfb.log || true
-exit 94
+exit 96
