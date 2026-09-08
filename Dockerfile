@@ -4,13 +4,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/steamuser \
     DISPLAY=:0
 
-# Base graphical stack + tools required by the official Steam launcher.
+# Steam requires both amd64 and i386 userspace libraries.
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        gnupg \
         dbus-x11 \
         xterm \
         xvfb \
@@ -22,30 +21,32 @@ RUN dpkg --add-architecture i386 && \
         libgl1-mesa-dri:i386 \
         libgl1-mesa-glx:amd64 \
         libgl1-mesa-glx:i386 \
-        mesa-vulkan-drivers:amd64 \
-        mesa-vulkan-drivers:i386 \
         libvulkan1:amd64 \
-        libvulkan1:i386 && \
-    curl -fsSL https://repo.steampowered.com/steam/archive/stable/steam.gpg \
-        -o /usr/share/keyrings/steam.gpg && \
-    printf '%s\n' \
-        'deb [arch=amd64,i386 signed-by=/usr/share/keyrings/steam.gpg] https://repo.steampowered.com/steam/ stable steam' \
-        > /etc/apt/sources.list.d/steam-stable.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        steam-launcher \
-        steam-libs-amd64:amd64 \
-        steam-libs-i386:i386 && \
-    apt-get clean
+        libvulkan1:i386 \
+        mesa-vulkan-drivers:amd64 \
+        mesa-vulkan-drivers:i386 && \
+    rm -rf /var/lib/apt/lists/*
 
-# steamdeps is useful on a normal desktop because it can request admin access
-# to install missing host packages. In this container all host dependencies are
-# installed at build time and runtime is intentionally non-root, so disable the
-# helper itself to prevent pkexec/apt dialogs inside VNC.
-RUN rm -f /usr/bin/steamdeps && \
+# Install Valve's current official launcher package directly.
+# Important: we DO NOT create steam-stable.list ourselves.
+# The package owns that conffile, avoiding dpkg's interactive conffile prompt.
+RUN curl -fsSL \
+        https://repo.steampowered.com/steam/archive/stable/steam_latest.deb \
+        -o /tmp/steam.deb && \
+    apt-get update && \
+    apt-get install -y \
+        -o Dpkg::Options::="--force-confnew" \
+        /tmp/steam.deb && \
+    rm -f /tmp/steam.deb && \
+    rm -rf /var/lib/apt/lists/* && \
     test -x /usr/bin/steam
 
-# X11 socket directory must exist before switching to the unprivileged user.
+# In a normal desktop steamdeps may invoke apt/pkexec.
+# All system packages are baked into this image and runtime is deliberately
+# non-root. Flathub uses the same pattern: make steamdeps a successful no-op.
+RUN ln -sf /bin/true /usr/bin/steamdeps
+
+# Xvfb cannot create this directory after USER steamuser.
 RUN mkdir -p /tmp/.X11-unix && \
     chmod 1777 /tmp/.X11-unix
 

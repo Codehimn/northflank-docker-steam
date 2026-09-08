@@ -4,12 +4,15 @@ set -eu
 export HOME=/home/steamuser
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/tmp/runtime-steamuser
+
+# Force software rendering: Northflank free tier has no GPU.
 export LIBGL_ALWAYS_SOFTWARE=1
+export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
-# Persist Steam client, login and installed games on the Northflank /data volume.
+# Persist Steam bootstrap/client/login/game files on Northflank's /data volume.
 mkdir -p /data/Steam /data/.steam "$HOME/.local/share"
 
 rm -rf "$HOME/.local/share/Steam" "$HOME/.steam"
@@ -71,21 +74,23 @@ echo "PASSWORD: none"
 
 echo "Starting Steam visible..."
 dbus-launch --exit-with-session \
-    steam -cef-disable-gpu -cef-disable-gpu-compositing \
+    "$STEAM_BIN" \
+    -cef-disable-gpu \
+    -cef-disable-gpu-compositing \
     >/tmp/steam.log 2>&1 &
 STEAM_PID=$!
 
 echo "Steam PID: $STEAM_PID"
 
-# Give the bootstrapper a moment; if it dies immediately, expose the reason.
-sleep 8
+# If the launcher exits immediately, print useful diagnostics.
+sleep 10
 if ! kill -0 "$STEAM_PID" 2>/dev/null; then
-    echo "Steam launcher exited; Steam may have re-execed or failed."
+    echo "Steam launcher exited or re-execed."
     echo "----- /tmp/steam.log -----"
-    tail -100 /tmp/steam.log || true
+    tail -120 /tmp/steam.log || true
 fi
 
-# Keep the graphical session alive for Northflank.
+# Keep the graphical session alive.
 while kill -0 "$XVFB_PID" 2>/dev/null; do
     sleep 60
 done
